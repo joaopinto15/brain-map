@@ -1,3 +1,6 @@
+mod node;
+
+use node::{normalize, parent_of, stem_of, NodeId};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -163,28 +166,6 @@ fn collect_md(dir: &Path, root: &Path, out: &mut Vec<String>) {
     }
 }
 
-fn parent_of(rel: &str) -> &str {
-    rel.rsplit_once('/').map_or("", |(dir, _)| dir)
-}
-
-fn stem_of(rel: &str) -> &str {
-    let base = rel.rsplit_once('/').map_or(rel, |(_, base)| base);
-    base.strip_suffix(".md").unwrap_or(base)
-}
-
-/// Notes named SKILL/README/INDEX carry no meaning on their own — label them by folder.
-fn label_of(rel: &str) -> String {
-    let stem = stem_of(rel);
-    if matches!(stem, "SKILL" | "README" | "INDEX" | "index") {
-        let parent = parent_of(rel);
-        let name = parent.rsplit_once('/').map_or(parent, |(_, base)| base);
-        if !name.is_empty() {
-            return name.to_string();
-        }
-    }
-    stem.to_string()
-}
-
 fn find(hay: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
     (from..hay.len().saturating_sub(needle.len() - 1))
         .find(|&i| &hay[i..i + needle.len()] == needle)
@@ -228,20 +209,6 @@ fn extract_links(text: &str) -> (Vec<String>, Vec<String>) {
     (wiki, md)
 }
 
-fn normalize(path: &str) -> String {
-    let mut parts: Vec<&str> = Vec::new();
-    for part in path.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            _ => parts.push(part),
-        }
-    }
-    parts.join("/")
-}
-
 struct Graph {
     json: String,
     node_count: usize,
@@ -262,13 +229,13 @@ fn build_graph(root: &Path) -> Graph {
         .map_or("Vault".to_string(), |n| n.to_string_lossy().into_owned());
 
     let mut groups: Vec<Group> = Vec::new();
-    let mut node_group: HashMap<String, String> = HashMap::new();
-    let mut tree_links: HashSet<(String, String)> = HashSet::new();
+    let mut node_group: HashMap<NodeId, String> = HashMap::new();
+    let mut tree_links: HashSet<(NodeId, NodeId)> = HashSet::new();
 
     if aios {
         groups = aios_groups();
         for rel in &files {
-            node_group.insert(rel.clone(), aios_group_of(rel).to_string());
+            node_group.insert(NodeId::Note(rel.clone()), aios_group_of(rel).to_string());
         }
     } else {
         // One group per top-level folder, smallest first so the growth starts tight.
@@ -307,92 +274,95 @@ fn build_graph(root: &Path) -> Graph {
                 cluster: false,
             });
             for rel in members {
-                node_group.insert(rel.clone(), key.to_string());
+                node_group.insert(NodeId::Note(rel.clone()), key.to_string());
             }
         }
-        if node_group.contains_key("CLAUDE.md") {
-            node_group.insert("CLAUDE.md".into(), "router".into());
+        let claude = NodeId::Note("CLAUDE.md".into());
+        if node_group.contains_key(&claude) {
+            node_group.insert(claude, "router".into());
         }
 
         // Structural tree (vault → folder → note) so link-free folders still form a galaxy.
-        node_group.insert("__vault__".into(), "router".into());
+        node_group.insert(NodeId::Vault, "router".into());
         for rel in &files {
+            let note = NodeId::Note(rel.clone());
             match rel.split_once('/') {
                 Some((top, _)) => {
-                    let dir_id = format!("__dir__{top}");
-                    if !node_group.contains_key(&dir_id) {
+                    let folder = NodeId::Folder(top.to_string());
+                    if !node_group.contains_key(&folder) {
                         let key = node_group
-                            .get(rel)
+                            .get(&note)
                             .cloned()
                             .unwrap_or_else(|| "root".into());
                         if let Some(g) = groups.iter_mut().find(|g| g.key == key) {
                             g.cluster = true;
                         }
-                        node_group.insert(dir_id.clone(), key);
-                        tree_links.insert(("__vault__".into(), dir_id.clone()));
+                        node_group.insert(folder.clone(), key);
+                        tree_links.insert((NodeId::Vault, folder.clone()));
                     }
-                    tree_links.insert((dir_id, rel.clone()));
+                    tree_links.insert((folder, note));
                 }
                 None => {
-                    tree_links.insert(("__vault__".into(), rel.clone()));
+                    tree_links.insert((NodeId::Vault, note));
                 }
             }
         }
     }
 
     // Wikilinks resolve by note name, or by path when the link spells one out.
-    let mut by_key: HashMap<String, String> = HashMap::new();
+    let mut by_key: HashMap<String, NodeId> = HashMap::new();
     for rel in &files {
+        let note = NodeId::Note(rel.clone());
         by_key
             .entry(stem_of(rel).to_lowercase())
-            .or_insert_with(|| rel.clone());
+            .or_insert_with(|| note.clone());
         by_key
             .entry(normalize(rel).trim_end_matches(".md").to_lowercase())
-            .or_insert_with(|| rel.clone());
+            .or_insert(note);
     }
 
-    let mut nodes: Vec<(String, String)> = Vec::new();
-    let mut seen_nodes: HashSet<String> = HashSet::new();
+    let mut nodes: Vec<(NodeId, String)> = Vec::new();
+    let mut seen_nodes: HashSet<NodeId> = HashSet::new();
     for (id, grp) in node_group.iter() {
-        if id.starts_with("__") {
+        if !id.is_note() {
             nodes.push((id.clone(), grp.clone()));
             seen_nodes.insert(id.clone());
         }
     }
     for rel in &files {
+        let note = NodeId::Note(rel.clone());
         let grp = node_group
-            .get(rel)
+            .get(&note)
             .cloned()
             .unwrap_or_else(|| "note".into());
-        nodes.push((rel.clone(), grp));
-        seen_nodes.insert(rel.clone());
+        seen_nodes.insert(note.clone());
+        nodes.push((note, grp));
     }
 
-    let mut links: HashSet<(String, String)> = tree_links;
-    let mut external: Vec<String> = Vec::new();
+    let mut links: HashSet<(NodeId, NodeId)> = tree_links;
+    let mut external: Vec<NodeId> = Vec::new();
     for rel in &files {
+        let from = NodeId::Note(rel.clone());
         let text = fs::read_to_string(root.join(rel)).unwrap_or_default();
         let (wiki, md) = extract_links(&text);
         for target in wiki {
             let key = normalize(target.trim().trim_end_matches(".md")).to_lowercase();
             if let Some(hit) = by_key.get(&key) {
-                if hit != rel {
-                    links.insert((rel.clone(), hit.clone()));
+                if *hit != from {
+                    links.insert((from.clone(), hit.clone()));
                 }
             }
         }
         for target in md {
             let resolved = normalize(&format!("{}/{}", parent_of(rel), target));
-            if resolved.is_empty() || !root.join(&resolved).is_file() {
+            if resolved.is_empty() || resolved == *rel || !root.join(&resolved).is_file() {
                 continue;
             }
-            if resolved == *rel {
-                continue;
+            let to = NodeId::Note(resolved);
+            if !seen_nodes.contains(&to) && !external.contains(&to) {
+                external.push(to.clone());
             }
-            if !seen_nodes.contains(&resolved) && !external.contains(&resolved) {
-                external.push(resolved.clone());
-            }
-            links.insert((rel.clone(), resolved));
+            links.insert((from.clone(), to));
         }
     }
 
@@ -407,7 +377,7 @@ fn build_graph(root: &Path) -> Graph {
 
     // AIOS vaults have no structural tree, so unlinked notes would float alone.
     if aios {
-        let mut degree: HashMap<&String, usize> = HashMap::new();
+        let mut degree: HashMap<&NodeId, usize> = HashMap::new();
         for (a, b) in &links {
             *degree.entry(a).or_default() += 1;
             *degree.entry(b).or_default() += 1;
@@ -416,31 +386,22 @@ fn build_graph(root: &Path) -> Graph {
     }
 
     let order_of = |key: &str| groups.iter().position(|g| g.key == key).unwrap_or(99);
-    nodes.sort_by(|(a_id, a_g), (b_id, b_g)| {
-        let rank = |g: &str| if g == "router" { 0 } else { order_of(g) + 1 };
-        (rank(a_g), parent_of(a_id), a_id).cmp(&(rank(b_g), parent_of(b_id), b_id))
-    });
+    let rank = |g: &str| if g == "router" { 0 } else { order_of(g) + 1 };
+    nodes.sort_by_key(|(id, grp)| (rank(grp), id.sort_key()));
 
-    let index: HashMap<&str, usize> = nodes
+    let index: HashMap<&NodeId, usize> = nodes
         .iter()
         .enumerate()
-        .map(|(i, (id, _))| (id.as_str(), i))
+        .map(|(i, (id, _))| (id, i))
         .collect();
 
     let node_json: Vec<String> = nodes
         .iter()
         .map(|(id, grp)| {
-            let label = if id == "__vault__" {
-                vault_name.clone()
-            } else if let Some(dir) = id.strip_prefix("__dir__") {
-                dir.to_string()
-            } else {
-                label_of(id)
-            };
             format!(
                 r#"{{"id":{},"label":{},"g":{}}}"#,
-                esc(id),
-                esc(&label),
+                esc(&id.wire_id()),
+                esc(&id.label(&vault_name)),
                 esc(grp)
             )
         })
@@ -448,7 +409,7 @@ fn build_graph(root: &Path) -> Graph {
 
     let mut edges: Vec<(usize, usize)> = links
         .iter()
-        .filter_map(|(a, b)| Some((*index.get(a.as_str())?, *index.get(b.as_str())?)))
+        .filter_map(|(a, b)| Some((*index.get(a)?, *index.get(b)?)))
         .collect();
     edges.sort_unstable();
     edges.dedup();
@@ -517,14 +478,6 @@ mod tests {
         let (wiki, md) = extract_links(text);
         assert_eq!(wiki, ["Alpha", "notes/Beta"]);
         assert_eq!(md, ["../Gamma.md"]);
-    }
-
-    #[test]
-    fn labels_and_paths() {
-        assert_eq!(label_of("wiki/skills/deploy/SKILL.md"), "deploy");
-        assert_eq!(label_of("ideas/Graphs.md"), "Graphs");
-        assert_eq!(normalize("ideas/../notes/./A.md"), "notes/A.md");
-        assert_eq!(esc("a\"b\n<c"), "\"a\\\"b\\n\\u003cc\"");
     }
 
     #[test]
