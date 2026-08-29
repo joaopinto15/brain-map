@@ -30,13 +30,16 @@ const canvas = {
   getContext: () => new Proxy({}, { get: () => () => ({ addColorStop: () => {} }) }),
   addEventListener: () => {}, classList: { add: () => {}, remove: () => {} }, style: {},
 };
-const document = { getElementById: id => (id === 'c' ? canvas : elements[id] ?? { addEventListener: () => {} }) };
+const document = {
+  documentElement: { style: { setProperty: () => {} } },
+  getElementById: id => (id === 'c' ? canvas : elements[id] ?? { addEventListener: () => {} }),
+};
 
 const run = new Function(
   '__GRAPH_JSON__', 'document', 'performance', 'requestAnimationFrame',
   'devicePixelRatio', 'innerWidth', 'innerHeight', 'addEventListener',
   script.replace('__GRAPH__', 'JSON.parse(__GRAPH_JSON__)') +
-  '\nreturn { frame, state: () => ({ active, alpha, done }) };'
+  '\nreturn { frame, state: () => ({ active, alpha, done }), THEMES, applyTheme, groupColor };'
 );
 const api = run(JSON.stringify(GRAPH), document, { now: () => 0 }, () => {}, 1, 1600, 900, () => {});
 
@@ -55,6 +58,19 @@ for (let f = 0; f < 6000; f++) {
   if (done && alpha <= 0.004 && settledAt === null) settledAt = f;
   if (settledAt !== null && f > settledAt + 120) break;
 }
+
+// Every theme must give every group a colour, and switching mid-run must not throw.
+const themeFail = [];
+for (const key of Object.keys(api.THEMES)) {
+  api.applyTheme(key);
+  for (const g of Object.keys(GRAPH.groups)) {
+    const c = api.groupColor(g);
+    if (!/^#[0-9a-f]{6}$/i.test(c)) themeFail.push(`${key}/${g} gave ${c}`);
+  }
+  now += STEP;
+  api.frame(now);
+}
+api.applyTheme('midnight');
 
 const { active } = api.state();
 const far = active.filter(n => !Number.isFinite(n.x) || Math.abs(n.x) > 1e4 || Math.abs(n.y) > 1e4);
@@ -78,8 +94,10 @@ if (far.length) fail.push(`${far.length} nodes flew off to infinity`);
 if (peak > 60) fail.push(`nodes jumped ${peak.toFixed(1)}px in one frame`);
 if (worstOverlap > 6) fail.push(`nodes overlap by ${worstOverlap.toFixed(1)}px`);
 if (drift > 0.5) fail.push(`still drifting ${drift.toFixed(2)}px/frame after settling`);
+if (themeFail.length) fail.push(`bad theme colours: ${themeFail.join(', ')}`);
 
 console.log(`nodes ${active.length} · settled after ${settledAt} frames · peak step ${peak.toFixed(1)}px ` +
-            `· overlap ${worstOverlap.toFixed(1)}px · drift ${drift.toFixed(3)}px`);
+            `· overlap ${worstOverlap.toFixed(1)}px · drift ${drift.toFixed(3)}px ` +
+            `· themes ${Object.keys(api.THEMES).join(', ')}`);
 if (fail.length) { console.error('FAIL: ' + fail.join('; ')); process.exit(1); }
 console.log('ok: graph settles and stays put');

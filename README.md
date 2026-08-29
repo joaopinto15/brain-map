@@ -23,6 +23,8 @@ still render as a clean structural tree (vault → folder → note).
   Click again or press **Esc** to release.
 - **Search** — type in the box and press Enter; the camera flies to the note.
 - **Legend** — top-right, one row per group with its note count.
+- **Themes** — pick one from the bar; the choice is remembered. Midnight is the default,
+  One Dark repaints the chrome, the canvas and the group colours.
 - Auto-grouping and colours by top-level folder, node size by connection count, and a
   camera that keeps the whole graph framed until you take over.
 
@@ -44,3 +46,7 @@ node tests/sim.mjs                   # force simulation settles and stays put
 ```
 
 The graph is rescanned on every page load, so adding notes and refreshing is enough.
+
+A theme is one entry in the `THEMES` table in `src/index.html`: chrome colours become CSS
+custom properties, canvas colours are read by the renderer, and an optional `palette`
+overrides the group colours the vault picked for itself.

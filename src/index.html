@@ -5,31 +5,40 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>brain-map</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #07090d; overflow: hidden;
+  :root {
+    --bg: #07090d; --panel: rgba(10,13,18,.85); --border: #1f2937;
+    --text: #e5e7eb; --muted: #9ca3af; --accent: #34d399;
+    --input-bg: #0d1320; --input-border: #283548; --btn-bg: #111827; --btn-hover: #1c2a3f;
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden;
     font-family: -apple-system, "SF Pro Text", Inter, system-ui, sans-serif; }
   canvas { display: block; cursor: grab; }
   canvas.drag { cursor: grabbing; }
   #bar {
     position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
     display: flex; gap: 9px; align-items: center; z-index: 10;
-    font-size: 13px; color: #9ca3af; background: rgba(10,13,18,.85);
-    border: 1px solid #1f2937; border-radius: 999px; padding: 8px 14px;
+    font-size: 13px; color: var(--muted); background: var(--panel);
+    border: 1px solid var(--border); border-radius: 999px; padding: 8px 14px;
     user-select: none; white-space: nowrap;
   }
-  #bar input { background: #0d1320; color: #e5e7eb; border: 1px solid #283548;
-    border-radius: 999px; padding: 6px 12px; font: inherit; outline: none; width: 150px; }
-  #bar button { background: #111827; color: #d1d5db; border: 1px solid #283548;
-    border-radius: 999px; padding: 6px 12px; font: inherit; cursor: pointer; }
-  #bar button:hover { background: #1c2a3f; }
-  #count { color: #34d399; font-variant-numeric: tabular-nums; }
+  #bar input, #bar select { background: var(--input-bg); color: var(--text);
+    border: 1px solid var(--input-border); border-radius: 999px; padding: 6px 12px;
+    font: inherit; outline: none; }
+  #bar input { width: 150px; }
+  #bar select { cursor: pointer; }
+  #bar button { background: var(--btn-bg); color: var(--text);
+    border: 1px solid var(--input-border); border-radius: 999px;
+    padding: 6px 12px; font: inherit; cursor: pointer; }
+  #bar button:hover { background: var(--btn-hover); }
+  #count { color: var(--accent); font-variant-numeric: tabular-nums; }
   #legend { position: fixed; right: 16px; top: 16px; z-index: 10;
-    font-size: 12.5px; color: #cbd5e1; background: rgba(10,13,18,.85);
-    border: 1px solid #1f2937; border-radius: 12px; padding: 10px 14px; user-select: none; }
+    font-size: 12.5px; color: var(--text); background: var(--panel);
+    border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; user-select: none; }
   #legend .row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
   #legend .dot { width: 9px; height: 9px; border-radius: 50%; }
   #hint { position: fixed; left: 16px; bottom: 16px; z-index: 10; max-width: 260px;
-    font-size: 12.5px; line-height: 1.5; color: #64748b; user-select: none; }
-  #hint b { color: #94a3b8; font-weight: 600; }
+    font-size: 12.5px; line-height: 1.5; color: var(--muted); opacity: .75; user-select: none; }
+  #hint b { color: var(--text); font-weight: 600; opacity: .9; }
 </style>
 </head>
 <body>
@@ -38,6 +47,7 @@
 <div id="bar">
   <span id="count">0 notes</span>
   <input id="q" placeholder="Search… (Enter)">
+  <select id="theme" title="Theme"></select>
   <button id="re">⟲ Replay</button>
 </div>
 <div id="hint">
@@ -47,6 +57,53 @@
 <script>
 const GRAPH = __GRAPH__;
 const STYLE = GRAPH.groups;
+
+// A theme paints the page chrome, the canvas, and — when it brings a palette — the
+// group colours too. Add an entry here and it shows up in the picker.
+const THEMES = {
+  midnight: {
+    name: 'Midnight',
+    bg: '#07090d', panel: 'rgba(10,13,18,.85)', border: '#1f2937',
+    text: '#e5e7eb', muted: '#9ca3af', accent: '#34d399',
+    inputBg: '#0d1320', inputBorder: '#283548', btnBg: '#111827', btnHover: '#1c2a3f',
+    canvasBg: '#07090d', link: 'rgba(90,110,140,.28)', linkLit: 'rgba(120,160,210,.7)',
+    linkDim: 'rgba(90,110,140,.05)', label: 'rgba(229,231,235,.85)',
+    palette: null, router: null,
+  },
+  onedark: {
+    name: 'One Dark',
+    bg: '#282c34', panel: 'rgba(33,37,43,.9)', border: '#3e4451',
+    text: '#abb2bf', muted: '#5c6370', accent: '#98c379',
+    inputBg: '#21252b', inputBorder: '#3e4451', btnBg: '#2c313a', btnHover: '#3e4451',
+    canvasBg: '#282c34', link: 'rgba(92,99,112,.4)', linkLit: 'rgba(97,175,239,.75)',
+    linkDim: 'rgba(92,99,112,.08)', label: 'rgba(171,178,191,.9)',
+    palette: ['#61afef', '#e5c07b', '#c678dd', '#98c379', '#e06c75', '#56b6c2',
+              '#d19a66', '#be5046', '#7f848e', '#abb2bf', '#528bff', '#c8ae9d'],
+    router: '#98c379',
+  },
+};
+const CSS_KEYS = ['bg', 'panel', 'border', 'text', 'muted', 'accent',
+                  'inputBg', 'inputBorder', 'btnBg', 'btnHover'];
+let theme = THEMES.midnight;
+
+function applyTheme(key) {
+  theme = THEMES[key] || THEMES.midnight;
+  const root = document.documentElement;
+  for (const k of CSS_KEYS) {
+    root.style.setProperty('--' + k.replace(/[A-Z]/g, m => '-' + m.toLowerCase()), theme[k]);
+  }
+  try { localStorage.setItem('brain-map-theme', key); } catch {}
+  drawLegend();
+}
+
+// Themes without a palette keep the colours the vault itself decided.
+function groupColor(key) {
+  if (!theme.palette) return STYLE[key].c;
+  if (key === 'router') return theme.router;
+  if (key === 'external') return theme.muted;
+  const order = Object.keys(STYLE).filter(k => k !== 'router' && k !== 'external');
+  return theme.palette[Math.max(0, order.indexOf(key)) % theme.palette.length];
+}
 const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
 const DPR = Math.min(devicePixelRatio || 1, 2);
 let W, H;
@@ -174,7 +231,7 @@ function hit(sx, sy) {
 
 function draw() {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.fillStyle = '#07090d'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = theme.canvasBg; ctx.fillRect(0, 0, W, H);
   if (active.length && !userCam) {
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     for (const n of active) {
@@ -198,26 +255,25 @@ function draw() {
   ctx.lineWidth = 0.6 / view.k;
   for (const l of activeLinks) {
     const on = lit && lit.has(l.source.i) && lit.has(l.target.i);
-    ctx.strokeStyle = lit ? (on ? 'rgba(120,160,210,.7)' : 'rgba(90,110,140,.05)')
-                          : 'rgba(90,110,140,.28)';
+    ctx.strokeStyle = lit ? (on ? theme.linkLit : theme.linkDim) : theme.link;
     ctx.beginPath(); ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y); ctx.stroke();
   }
   for (const n of active) {
-    const st = STYLE[n.g], dim = lit && !lit.has(n.i);
+    const st = STYLE[n.g], colour = groupColor(n.g), dim = lit && !lit.has(n.i);
     ctx.globalAlpha = dim ? 0.12 : 1;
     if (st.glow && !dim) {
       const halo = ctx.createRadialGradient(n.x, n.y, n.r, n.x, n.y, n.r + st.glow / 3);
-      halo.addColorStop(0, st.c + '55'); halo.addColorStop(1, st.c + '00');
+      halo.addColorStop(0, colour + '55'); halo.addColorStop(1, colour + '00');
       ctx.fillStyle = halo;
       ctx.beginPath(); ctx.arc(n.x, n.y, n.r + st.glow / 3, 0, 7); ctx.fill();
     }
-    ctx.fillStyle = st.c;
+    ctx.fillStyle = colour;
     ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, 7); ctx.fill();
   }
   ctx.globalAlpha = 1;
   ctx.textAlign = 'center';
   ctx.font = `500 ${11 / view.k}px -apple-system, system-ui, sans-serif`;
-  ctx.fillStyle = 'rgba(229,231,235,.85)';
+  ctx.fillStyle = theme.label;
   for (const n of active) {
     if (lit ? lit.has(n.i) : view.k * n.r > 8) {
       ctx.fillText(n.label, n.x, n.y - n.r - 5 / view.k);
@@ -276,7 +332,7 @@ addEventListener('mouseup', e => {
   canvas.classList.remove('drag');
 });
 addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.key === 'Escape') selected = null;
   if (e.key === 'r' || e.key === 'R') restart();
 });
@@ -304,10 +360,21 @@ document.getElementById('re').onclick = restart;
 const legend = document.getElementById('legend');
 const counts = {};
 for (const n of nodes) counts[n.g] = (counts[n.g] || 0) + 1;
-legend.innerHTML = Object.entries(STYLE)
-  .filter(([g]) => counts[g])
-  .map(([g, st]) => `<div class="row"><span class="dot" style="background:${st.c}"></span>${st.name} · ${counts[g]}</div>`)
-  .join('');
+function drawLegend() {
+  legend.innerHTML = Object.entries(STYLE)
+    .filter(([g]) => counts[g])
+    .map(([g, st]) => `<div class="row"><span class="dot" style="background:${groupColor(g)}"></span>${st.name} · ${counts[g]}</div>`)
+    .join('');
+}
+
+const picker = document.getElementById('theme');
+picker.innerHTML = Object.entries(THEMES)
+  .map(([key, t]) => `<option value="${key}">${t.name}</option>`).join('');
+let saved = 'midnight';
+try { saved = localStorage.getItem('brain-map-theme') || saved; } catch {}
+picker.value = THEMES[saved] ? saved : 'midnight';
+picker.addEventListener('change', () => applyTheme(picker.value));
+applyTheme(picker.value);
 
 restart();
 requestAnimationFrame(frame);

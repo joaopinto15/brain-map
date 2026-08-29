@@ -54,6 +54,9 @@ or the harness stops being able to load it.
 - The graph model mirrors the reference project's `build.py`: group table with
   `pace`/`pause` driving the growth animation, structural tree nodes, AIOS detection
   via `CLAUDE.md` + `wiki/`.
+- Colours in the page come from the `THEMES` table in `src/index.html`, never from
+  literals in the stylesheet or the renderer. Chrome colours are pushed to CSS custom
+  properties; canvas colours are read from the active theme each frame.
 - The force simulation is a hand-rolled port of d3-force (link, charge, collide, center,
   gravity) with alpha cooling. Never remove the alpha decay or the collide pass — without
   them the nodes jitter and fling apart.
