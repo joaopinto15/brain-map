@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>brain-map</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #07090d; overflow: hidden;
+    font-family: -apple-system, "SF Pro Text", Inter, system-ui, sans-serif; }
+  canvas { display: block; cursor: grab; }
+  canvas.drag { cursor: grabbing; }
+  #bar {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+    display: flex; gap: 9px; align-items: center; z-index: 10;
+    font-size: 13px; color: #9ca3af; background: rgba(10,13,18,.85);
+    border: 1px solid #1f2937; border-radius: 999px; padding: 8px 14px;
+    user-select: none; white-space: nowrap;
+  }
+  #bar input { background: #0d1320; color: #e5e7eb; border: 1px solid #283548;
+    border-radius: 999px; padding: 6px 12px; font: inherit; outline: none; width: 150px; }
+  #bar button { background: #111827; color: #d1d5db; border: 1px solid #283548;
+    border-radius: 999px; padding: 6px 12px; font: inherit; cursor: pointer; }
+  #bar button:hover { background: #1c2a3f; }
+  #count { color: #34d399; font-variant-numeric: tabular-nums; }
+  #legend { position: fixed; right: 16px; top: 16px; z-index: 10;
+    font-size: 12.5px; color: #cbd5e1; background: rgba(10,13,18,.85);
+    border: 1px solid #1f2937; border-radius: 12px; padding: 10px 14px; user-select: none; }
+  #legend .row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+  #legend .dot { width: 9px; height: 9px; border-radius: 50%; }
+  #hint { position: fixed; left: 16px; bottom: 16px; z-index: 10; max-width: 260px;
+    font-size: 12.5px; line-height: 1.5; color: #64748b; user-select: none; }
+  #hint b { color: #94a3b8; font-weight: 600; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="legend"></div>
+<div id="bar">
+  <span id="count">0 notes</span>
+  <input id="q" placeholder="Search… (Enter)">
+  <button id="re">⟲ Replay</button>
+</div>
+<div id="hint">
+  <b>drag</b> to pan · <b>scroll</b> to zoom · <b>click</b> a node for its links ·
+  <b>R</b> replays the growth · <b>Esc</b> releases
+</div>
+<script>
+const GRAPH = __GRAPH__;
+const STYLE = GRAPH.groups;
+const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
+const DPR = Math.min(devicePixelRatio || 1, 2);
+let W, H;
+function resize() {
+  W = innerWidth; H = innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+}
+resize(); addEventListener('resize', resize);
+
+const nodes = GRAPH.nodes.map((n, i) => ({ ...n, i, x: 0, y: 0, vx: 0, vy: 0, fx: null, fy: null }));
+const degree = new Array(nodes.length).fill(0);
+for (const l of GRAPH.links) { degree[l.s]++; degree[l.t]++; }
+const links = GRAPH.links.map(l => {
+  const source = nodes[l.s], target = nodes[l.t];
+  const count = degree[l.s] + degree[l.t];
+  return { source, target, bias: count ? degree[l.s] / count : 0.5 };
+});
+for (const n of nodes) {
+  const st = STYLE[n.g];
+  n.r = Math.min(st.r * 2.2, st.r * (0.8 + Math.sqrt(degree[n.i]) * 0.15));
+  n.charge = -(15 + n.r * 6);
+}
+const neighbours = nodes.map(() => []);
+for (const l of links) {
+  neighbours[l.source.i].push(l.target.i);
+  neighbours[l.target.i].push(l.source.i);
+}
+
+// Growth schedule: each group enters as a burst, paced by its own size.
+let clockAt = 600, prevGroup = null;
+for (const n of nodes) {
+  const st = STYLE[n.g];
+  if (n.g !== prevGroup) { clockAt += st.pause ?? 500; prevGroup = n.g; }
+  clockAt += st.pace ?? 60;
+  n.t = clockAt;
+}
+
+const LINK_DISTANCE = 30, LINK_STRENGTH = 0.5, CHARGE_MAX2 = 450 * 450;
+const CENTER_STRENGTH = 0.05, GRAVITY = 0.03, COLLIDE_PAD = 3.5, COLLIDE_STRENGTH = 0.9;
+const VELOCITY_DECAY = 0.6, ALPHA_DECAY = 0.012, ALPHA_FLOOR = 0.004;
+
+let active = [], activeLinks = [], nextIdx = 0, born = new Set();
+let alpha = 0, clock = 0, last = performance.now(), done = false;
+let view = { x: 0, y: 0, k: 1.5 }, userCam = false;
+let selected = null, hover = null;
+
+// ponytail: O(n²) pair loop, smooth to a few thousand notes; Barnes-Hut past that.
+function tick() {
+  alpha -= alpha * ALPHA_DECAY;
+
+  for (const l of activeLinks) {
+    const s = l.source, t = l.target;
+    let dx = t.x + t.vx - s.x - s.vx, dy = t.y + t.vy - s.y - s.vy;
+    const d = Math.hypot(dx, dy) || 1e-6;
+    const w = (d - LINK_DISTANCE) / d * alpha * LINK_STRENGTH;
+    dx *= w; dy *= w;
+    t.vx -= dx * l.bias; t.vy -= dy * l.bias;
+    s.vx += dx * (1 - l.bias); s.vy += dy * (1 - l.bias);
+  }
+
+  for (let i = 0; i < active.length; i++) {
+    const a = active[i];
+    for (let j = i + 1; j < active.length; j++) {
+      const b = active[j];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      // Coincident nodes would divide by zero and fling each other off-screen.
+      const d2 = Math.max(dx * dx + dy * dy, 1);
+      if (d2 < CHARGE_MAX2) {
+        a.vx += dx * b.charge * alpha / d2; a.vy += dy * b.charge * alpha / d2;
+        b.vx -= dx * a.charge * alpha / d2; b.vy -= dy * a.charge * alpha / d2;
+      }
+      const touch = a.r + b.r + COLLIDE_PAD * 2;
+      if (d2 < touch * touch) {
+        let cx = b.x + b.vx - a.x - a.vx, cy = b.y + b.vy - a.y - a.vy;
+        const d = Math.hypot(cx, cy) || 1e-6;
+        const push = (touch - d) / d * COLLIDE_STRENGTH;
+        cx *= push; cy *= push;
+        const share = (b.r * b.r) / (a.r * a.r + b.r * b.r);
+        b.vx += cx * share; b.vy += cy * share;
+        a.vx -= cx * (1 - share); a.vy -= cy * (1 - share);
+      }
+    }
+    a.vx -= a.x * GRAVITY * alpha; a.vy -= a.y * GRAVITY * alpha;
+  }
+
+  let cx = 0, cy = 0;
+  for (const n of active) { cx += n.x; cy += n.y; }
+  cx = cx / active.length * CENTER_STRENGTH; cy = cy / active.length * CENTER_STRENGTH;
+
+  for (const n of active) {
+    if (n.fx === null) { n.vx *= VELOCITY_DECAY; n.x += n.vx - cx; }
+    else { n.x = n.fx; n.vx = 0; }
+    if (n.fy === null) { n.vy *= VELOCITY_DECAY; n.y += n.vy - cy; }
+    else { n.y = n.fy; n.vy = 0; }
+  }
+}
+
+function activate(time) {
+  let changed = false;
+  while (nextIdx < nodes.length && nodes[nextIdx].t <= time) {
+    const n = nodes[nextIdx];
+    const anchor = neighbours[n.i].map(j => nodes[j]).find(m => born.has(m.i));
+    const angle = Math.random() * 7;
+    n.x = (anchor ? anchor.x : 0) + Math.cos(angle) * (anchor ? 24 : 30);
+    n.y = (anchor ? anchor.y : 0) + Math.sin(angle) * (anchor ? 24 : 30);
+    n.vx = n.vy = 0;
+    active.push(n); born.add(n.i); nextIdx++; changed = true;
+  }
+  if (changed) {
+    activeLinks = links.filter(l => born.has(l.source.i) && born.has(l.target.i));
+    alpha = Math.max(alpha, Math.min(0.5, 0.2 + active.length / 800));
+  }
+}
+
+const toWorld = (sx, sy) => [(sx - W / 2) / view.k + view.x, (sy - H / 2) / view.k + view.y];
+function hit(sx, sy) {
+  const [wx, wy] = toWorld(sx, sy);
+  for (let i = active.length - 1; i >= 0; i--) {
+    const n = active[i], r = Math.max(n.r, 5 / view.k) + 3 / view.k;
+    if ((n.x - wx) ** 2 + (n.y - wy) ** 2 <= r * r) return n;
+  }
+  return null;
+}
+
+function draw() {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = '#07090d'; ctx.fillRect(0, 0, W, H);
+  if (active.length && !userCam) {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const n of active) {
+      x0 = Math.min(x0, n.x); x1 = Math.max(x1, n.x);
+      y0 = Math.min(y0, n.y); y1 = Math.max(y1, n.y);
+    }
+    const fit = Math.min(2, W / (x1 - x0 + 220), H / (y1 - y0 + 220));
+    view.k += (fit - view.k) * 0.05;
+    view.x += ((x0 + x1) / 2 - view.x) * 0.07;
+    view.y += ((y0 + y1) / 2 - view.y) * 0.07;
+  }
+  ctx.translate(W / 2, H / 2); ctx.scale(view.k, view.k); ctx.translate(-view.x, -view.y);
+
+  const focus = selected || hover;
+  let lit = null;
+  if (focus) {
+    lit = new Set([focus.i]);
+    for (const j of neighbours[focus.i]) if (born.has(j)) lit.add(j);
+  }
+
+  ctx.lineWidth = 0.6 / view.k;
+  for (const l of activeLinks) {
+    const on = lit && lit.has(l.source.i) && lit.has(l.target.i);
+    ctx.strokeStyle = lit ? (on ? 'rgba(120,160,210,.7)' : 'rgba(90,110,140,.05)')
+                          : 'rgba(90,110,140,.28)';
+    ctx.beginPath(); ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y); ctx.stroke();
+  }
+  for (const n of active) {
+    const st = STYLE[n.g], dim = lit && !lit.has(n.i);
+    ctx.globalAlpha = dim ? 0.12 : 1;
+    if (st.glow && !dim) {
+      const halo = ctx.createRadialGradient(n.x, n.y, n.r, n.x, n.y, n.r + st.glow / 3);
+      halo.addColorStop(0, st.c + '55'); halo.addColorStop(1, st.c + '00');
+      ctx.fillStyle = halo;
+      ctx.beginPath(); ctx.arc(n.x, n.y, n.r + st.glow / 3, 0, 7); ctx.fill();
+    }
+    ctx.fillStyle = st.c;
+    ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'center';
+  ctx.font = `500 ${11 / view.k}px -apple-system, system-ui, sans-serif`;
+  ctx.fillStyle = 'rgba(229,231,235,.85)';
+  for (const n of active) {
+    if (lit ? lit.has(n.i) : view.k * n.r > 8) {
+      ctx.fillText(n.label, n.x, n.y - n.r - 5 / view.k);
+    }
+  }
+  document.getElementById('count').textContent =
+    `${active.length} notes · ${activeLinks.length} links`;
+}
+
+function frame(now) {
+  clock += now - last; last = now;
+  if (!done) { activate(clock); if (nextIdx >= nodes.length) done = true; }
+  if (alpha > ALPHA_FLOOR) tick();
+  draw();
+  requestAnimationFrame(frame);
+}
+
+let panning = false, dragging = null, mx = 0, my = 0, moved = 0;
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  userCam = true;
+  const k = Math.max(0.1, Math.min(8, view.k * Math.exp(-e.deltaY * 0.0015)));
+  const [wx, wy] = toWorld(e.clientX, e.clientY);
+  view.x = wx - (e.clientX - W / 2) / k;
+  view.y = wy - (e.clientY - H / 2) / k;
+  view.k = k;
+}, { passive: false });
+canvas.addEventListener('mousedown', e => {
+  moved = 0; mx = e.clientX; my = e.clientY;
+  dragging = hit(e.clientX, e.clientY);
+  if (dragging) {
+    dragging.fx = dragging.x; dragging.fy = dragging.y;
+    alpha = Math.max(alpha, 0.2);
+  } else { panning = true; userCam = true; }
+  canvas.classList.add('drag');
+});
+addEventListener('mousemove', e => {
+  moved += Math.abs(e.clientX - mx) + Math.abs(e.clientY - my);
+  if (dragging) {
+    const [wx, wy] = toWorld(e.clientX, e.clientY);
+    dragging.fx = wx; dragging.fy = wy;
+    alpha = Math.max(alpha, 0.15);
+  } else if (panning) {
+    view.x -= (e.clientX - mx) / view.k;
+    view.y -= (e.clientY - my) / view.k;
+  } else hover = hit(e.clientX, e.clientY);
+  mx = e.clientX; my = e.clientY;
+});
+addEventListener('mouseup', e => {
+  if (moved < 5) {
+    const n = hit(e.clientX, e.clientY);
+    selected = n === selected ? null : n;
+  }
+  if (dragging) { dragging.fx = null; dragging.fy = null; }
+  dragging = null; panning = false;
+  canvas.classList.remove('drag');
+});
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'Escape') selected = null;
+  if (e.key === 'r' || e.key === 'R') restart();
+});
+document.getElementById('q').addEventListener('keydown', e => {
+  e.stopPropagation();
+  if (e.key !== 'Enter') return;
+  const q = e.target.value.trim().toLowerCase();
+  if (!q) return;
+  const n = active.find(x => x.label.toLowerCase().includes(q))
+         || active.find(x => x.id.toLowerCase().includes(q));
+  if (n) {
+    selected = n; userCam = true;
+    view.x = n.x; view.y = n.y; view.k = Math.max(view.k, 2.2);
+  }
+});
+
+function restart() {
+  for (const n of nodes) { n.vx = n.vy = 0; n.fx = n.fy = null; }
+  active = []; activeLinks = []; nextIdx = 0; born = new Set();
+  clock = 0; alpha = 0; done = false; selected = null; hover = null; userCam = false;
+  view = { x: 0, y: 0, k: 1.5 };
+}
+document.getElementById('re').onclick = restart;
+
+const legend = document.getElementById('legend');
+const counts = {};
+for (const n of nodes) counts[n.g] = (counts[n.g] || 0) + 1;
+legend.innerHTML = Object.entries(STYLE)
+  .filter(([g]) => counts[g])
+  .map(([g, st]) => `<div class="row"><span class="dot" style="background:${st.c}"></span>${st.name} · ${counts[g]}</div>`)
+  .join('');
+
+restart();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
