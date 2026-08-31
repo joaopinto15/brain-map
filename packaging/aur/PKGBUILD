@@ -10,7 +10,7 @@ pkgver=0.0.0
 pkgrel=1
 pkgdesc="Turns a folder of markdown notes into an interactive knowledge graph"
 arch=('x86_64')
-url="https://github.com/CHANGE-ME/brain-map"
+url="https://github.com/joaopinto15/brain-map"
 license=('MIT')
 # webkit2gtk-4.1 carries gtk3, libsoup3 and javascriptcoregtk with it, so listing those
 # again would only be repeating its own dependencies.
