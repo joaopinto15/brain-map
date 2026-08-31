@@ -137,3 +137,8 @@ scripts concatenated in order.
 A theme is one entry in the `THEMES` table in `src/web/theme.js`: chrome colours become CSS
 custom properties, canvas colours are read by the renderer, and an optional `palette`
 overrides the group colours the vault picked for itself.
+
+## License
+
+MIT — see [LICENSE](LICENSE). The emoji keyword table in `src/emojis.txt` is vendored
+from [Omarchy](https://github.com/basecamp/omarchy) (MIT).
