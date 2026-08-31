@@ -4,3 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+emojis = "0.9"
+tao = "0.37"
+wry = { version = "0.56", features = ["devtools"] }

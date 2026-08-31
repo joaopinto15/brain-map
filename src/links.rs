@@ -1,4 +1,5 @@
-//! Connections read out of note text: `[[wikilinks]]` and relative markdown links.
+//! Connections read out of note text: `[[wikilinks]]` and markdown links, either
+//! relative or Open Knowledge Format bundle-absolute (`/tables/customers.md`).
 
 use crate::node::{normalize, parent_of, stem_of, NodeId};
 use crate::vault::Vault;
@@ -39,7 +40,11 @@ impl Links {
             }
 
             for target in md {
-                let resolved = normalize(&format!("{}/{}", parent_of(&note.path), target));
+                // OKF bundle-absolute links start at the root; everything else is relative.
+                let resolved = match target.strip_prefix('/') {
+                    Some(abs) => normalize(abs),
+                    None => normalize(&format!("{}/{}", parent_of(&note.path), target)),
+                };
                 if resolved.is_empty() || resolved == note.path {
                     continue;
                 }
@@ -151,6 +156,24 @@ mod tests {
         assert_eq!(
             edges(&vault),
             [("ideas/Graphs.md".to_string(), "Rust.md".to_string())]
+        );
+    }
+
+    #[test]
+    fn resolves_bundle_absolute_markdown_links() {
+        let vault = fixture(
+            false,
+            &[
+                ("metrics/revenue.md", "[orders](/tables/orders.md)"),
+                ("tables/orders.md", ""),
+            ],
+        );
+        assert_eq!(
+            edges(&vault),
+            [(
+                "metrics/revenue.md".to_string(),
+                "tables/orders.md".to_string()
+            )]
         );
     }
 

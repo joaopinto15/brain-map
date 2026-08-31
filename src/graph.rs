@@ -12,6 +12,7 @@ pub struct Node {
     pub id: NodeId,
     pub label: String,
     pub group: String,
+    pub tags: Vec<String>,
 }
 
 pub struct Graph {
@@ -71,15 +72,40 @@ impl Graph {
             mode: layout.mode,
             nodes: ids
                 .iter()
-                .map(|id| Node {
-                    label: id.label(&vault.name),
-                    group: layout.group_key(id).to_string(),
-                    id: id.clone(),
+                .map(|id| {
+                    // A note's frontmatter `title` names it better than its filename does.
+                    let note = match id {
+                        NodeId::Note(path) => vault.note(path),
+                        _ => None,
+                    };
+                    Node {
+                        label: note
+                            .and_then(|n| n.title.clone())
+                            .unwrap_or_else(|| id.label(&vault.name)),
+                        group: layout.group_key(id).to_string(),
+                        tags: note.map(|n| n.tags.clone()).unwrap_or_default(),
+                        id: id.clone(),
+                    }
                 })
                 .collect(),
             groups: layout.groups,
             links,
         }
+    }
+
+    /// One emoji per tag and per group, so the page never has to guess at one.
+    fn icons(&self) -> Vec<(String, &'static str)> {
+        let mut keys: Vec<&str> = self.groups.iter().map(|g| g.key.as_str()).collect();
+        keys.extend(
+            self.nodes
+                .iter()
+                .flat_map(|n| n.tags.iter().map(String::as_str)),
+        );
+        keys.sort_unstable();
+        keys.dedup();
+        keys.iter()
+            .filter_map(|key| Some((key.to_string(), crate::icons::of(key)?)))
+            .collect()
     }
 
     pub fn to_json(&self) -> String {
@@ -98,11 +124,19 @@ impl Graph {
             .nodes
             .iter()
             .map(|n| {
+                let tags = match n.tags.is_empty() {
+                    true => String::new(),
+                    false => format!(
+                        r#","tags":[{}]"#,
+                        n.tags.iter().map(|t| esc(t)).collect::<Vec<_>>().join(",")
+                    ),
+                };
                 format!(
-                    r#"{{"id":{},"label":{},"g":{}}}"#,
+                    r#"{{"id":{},"label":{},"g":{}{}}}"#,
                     esc(&n.id.wire_id()),
                     esc(&n.label),
-                    esc(&n.group)
+                    esc(&n.group),
+                    tags
                 )
             })
             .collect();
@@ -111,10 +145,16 @@ impl Graph {
             .iter()
             .map(|(s, t)| format!(r#"{{"s":{s},"t":{t}}}"#))
             .collect();
+        let icons: Vec<String> = self
+            .icons()
+            .iter()
+            .map(|(key, emoji)| format!("{}:{}", esc(key), esc(emoji)))
+            .collect();
         format!(
-            r#"{{"vault":{},"groups":{{{}}},"nodes":[{}],"links":[{}]}}"#,
+            r#"{{"vault":{},"groups":{{{}}},"icons":{{{}}},"nodes":[{}],"links":[{}]}}"#,
             esc(&self.vault_path),
             groups.join(","),
+            icons.join(","),
             nodes.join(","),
             links.join(",")
         )
@@ -246,6 +286,46 @@ mod tests {
         assert_eq!(external.id.wire_id(), "node_modules/pkg/README.md");
         assert_eq!(external.label, "pkg", "a README is labelled by its folder");
         assert_eq!(graph.mode, "generic folder grouping");
+    }
+
+    #[test]
+    fn frontmatter_titles_and_tags_reach_the_wire() {
+        let vault = fixture(
+            false,
+            &[
+                (
+                    "m/rev.md",
+                    "---\ntitle: Weekly revenue\ntags: [sales, finance]\n---\n",
+                ),
+                ("m/plain.md", ""),
+            ],
+        );
+        let graph = graph_of(&vault);
+        let titled = graph
+            .nodes
+            .iter()
+            .find(|n| n.id.wire_id() == "m/rev.md")
+            .unwrap();
+        assert_eq!(titled.label, "Weekly revenue");
+        assert_eq!(titled.tags, ["sales", "finance"]);
+
+        let json = graph.to_json();
+        assert!(json.contains(r#""label":"Weekly revenue","g":"m","tags":["sales","finance"]"#));
+        assert!(
+            json.contains(r#""label":"plain","g":"m"}"#),
+            "untagged nodes carry no tags key"
+        );
+    }
+
+    #[test]
+    fn the_wire_carries_an_icon_for_every_tag_and_group() {
+        let vault = fixture(false, &[("ideas/a.md", "---\ntags: [linux]\n---\n")]);
+        let json = graph_of(&vault).to_json();
+        assert!(
+            json.contains("\"linux\":\"\u{1f427}\""),
+            "the tag resolves to a penguin"
+        );
+        assert!(json.contains("\"ideas\":\""), "the group gets one too");
     }
 
     #[test]

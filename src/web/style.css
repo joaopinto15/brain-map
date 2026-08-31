@@ -1,0 +1,211 @@
+  :root {
+    --bg: #07090d; --panel: rgba(10,13,18,.85); --border: #1f2937;
+    --text: #e5e7eb; --muted: #9ca3af; --accent: #34d399;
+    --input-bg: #0d1320; --input-border: #283548; --btn-bg: #111827; --btn-hover: #1c2a3f;
+    --heading: #f1f5f9; --strong: #fde68a; --code: #f9a8d4;
+    /* The explorer's width, and so where the canvas is centred and the hint sits.
+       The grip on the panel's edge rewrites it; this is only the starting value. */
+    --panel-w: 420px;
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden;
+    font-family: -apple-system, "SF Pro Text", Inter, system-ui, sans-serif; }
+  /* Scrollbars and native widgets follow the theme. Both properties inherit, so every
+     scroller in the page picks them up from here. Chromium ignores ::-webkit-scrollbar
+     once scrollbar-color is set, so there is no point writing that pass as well. */
+  html { color-scheme: dark; scrollbar-width: thin;
+    scrollbar-color: var(--input-border) transparent; }
+  canvas { display: block; cursor: grab; }
+  canvas.drag { cursor: grabbing; }
+  /* The bar is one lozenge split by a hairline: state on the left, actions on the right.
+     The actions stay unlit until pointed at, so the only bright thing at rest is the
+     count, and focusing the search shifts the bar's weight onto the query. */
+  #bar {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+    display: flex; gap: 8px; align-items: center; z-index: 10;
+    font-size: 13px; color: var(--muted); background: var(--panel);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--border); border-radius: 999px; padding: 7px 8px 7px 16px;
+    user-select: none; white-space: nowrap;
+  }
+  #bar .sep { width: 1px; align-self: stretch; margin: 2px 1px;
+    background: var(--border); }
+  #bar input, #bar select, #settings select, #settings input[type=text] {
+    background: var(--input-bg); color: var(--text);
+    border: 1px solid var(--input-border); border-radius: 999px; padding: 6px 12px;
+    font: inherit; outline: none; }
+  #bar input { width: 160px; transition: width .18s ease, border-color .18s ease; }
+  #bar input:focus { width: 240px; border-color: var(--accent); }
+  #bar select, #settings select { cursor: pointer; }
+  #bar button, #settings button { background: var(--btn-bg); color: var(--text);
+    border: 1px solid var(--input-border); border-radius: 999px;
+    padding: 6px 12px; font: inherit; cursor: pointer; }
+  #bar button:hover, #settings button:hover { background: var(--btn-hover); }
+  /* Bar actions are glyphs, not labels: square, quiet, named by their tooltip. */
+  #bar button { width: 30px; height: 30px; padding: 0; font-size: 14px; line-height: 1;
+    background: none; border-color: transparent; color: var(--muted);
+    transition: background .12s ease, color .12s ease; }
+  #bar button:hover { background: var(--btn-hover); color: var(--text); }
+  /* outline: none above kills the native ring, so every control states its own focus. */
+  #bar :focus-visible, #settings :focus-visible, #picker :focus-visible {
+    outline: 1px solid var(--accent); outline-offset: 1px; }
+  @media (prefers-reduced-motion: reduce) { #bar *, #bar { transition: none; } }
+  /* The settings dialog. <dialog> supplies the modality and the backdrop; everything
+     here is the card, laid out as label-above-control so long vault paths have room. */
+  #settings { color: var(--text); background: var(--panel); font: inherit;
+    border: 1px solid var(--border); border-radius: 14px; padding: 0 22px 22px;
+    width: min(420px, 92vw); max-height: 82vh; overflow: auto; }
+  #settings::backdrop { background: rgba(0, 0, 0, .55); }
+  #settings header { display: flex; align-items: center; gap: 10px;
+    position: sticky; top: 0; background: var(--panel); padding: 18px 0 12px;
+    border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+  #settings h2 { margin: 0; font-size: 15px; font-weight: 600; flex: 1; }
+  #settings header button { border: 0; background: none; color: var(--muted);
+    padding: 0 2px; font-size: 15px; }
+  #settings header button:hover { background: none; color: var(--text); }
+  #settings label { display: block; color: var(--muted); font-size: 11.5px;
+    margin: 16px 0 6px; }
+  #settings select { width: 100%; }
+  #settings .row { display: flex; align-items: center; gap: 10px; }
+  #settings .row span { color: var(--muted); font-size: 12px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #settings #vaultnow { flex: 1; min-width: 0; color: var(--text); }
+  #settings .row button { flex: none; }
+  #settings input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); }
+  #settings input[type=checkbox] { accent-color: var(--accent);
+    width: 15px; height: 15px; margin: 0; }
+  #settings .note { flex: none; opacity: .7; }
+  #count { color: var(--accent); font-variant-numeric: tabular-nums; }
+  #legend { position: fixed; right: 16px; top: 16px; z-index: 10;
+    font-size: 12.5px; color: var(--text); background: var(--panel);
+    border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; user-select: none; }
+  #legend .row { display: flex; align-items: center; gap: 8px; padding: 3px 7px;
+    margin: 0 -7px; border-radius: 6px; cursor: pointer; }
+  #legend .row:hover { background: var(--btn-bg); }
+  #legend .row.on { background: var(--btn-hover); color: var(--accent); }
+  #legend .hint { color: var(--muted); font-size: 10.5px; padding-top: 7px; }
+  #legend .dot { width: 9px; height: 9px; border-radius: 50%; }
+  #legend .tags { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+  #legend .icon { width: 9px; text-align: center; font-size: 12px; line-height: 1; }
+  #reader { position: fixed; left: 0; top: 0; bottom: 0; z-index: 20;
+    width: min(var(--panel-w), 92vw); display: flex; flex-direction: column;
+    background: var(--panel); backdrop-filter: blur(14px);
+    border-right: 1px solid var(--border); color: var(--text); }
+  /* Drag anywhere down the panel's edge to widen or narrow it. */
+  #grip { position: absolute; top: 0; right: -3px; width: 7px; height: 100%;
+    cursor: col-resize; z-index: 21; touch-action: none; }
+  #grip:hover, #grip.on { background: var(--accent); opacity: .55; }
+  /* The explorer holds the panel; a note takes it over while it is open. */
+  #reader header, #tags, #body { display: none; }
+  body.reading #tree { display: none; }
+  body.reading #reader header { display: flex; }
+  body.reading #tags { display: flex; }
+  body.reading #body { display: block; }
+  /* Fullscreen reading: the panel takes the window, and the measure stays readable
+     rather than running the width of a monitor. */
+  body.hidden-panel #reader { display: none; }
+  body.full #reader { width: 100%; border-right: 0; }
+  body.full #grip { display: none; }
+  body.full #full { color: var(--accent); }
+  body.full #body, body.full #reader header, body.full #tags {
+    width: 100%; max-width: 820px; margin-left: auto; margin-right: auto; }
+  #tree { flex: 1; overflow: auto; padding: 10px 8px;
+    font-size: 12.5px; line-height: 1.45; }
+  #tree details { margin: 0; }
+  #tree summary { display: flex; align-items: center; gap: 5px; cursor: pointer;
+    list-style: none; padding: 3px 6px; border-radius: 5px; color: var(--muted);
+    white-space: nowrap; overflow: hidden; }
+  #tree summary::-webkit-details-marker { display: none; }
+  #tree summary::before { content: '▸'; font-size: 9px; width: 9px; flex: none;
+    transition: transform .12s ease; }
+  #tree details[open] > summary::before { transform: rotate(90deg); }
+  #tree summary:hover, #tree .file:hover { background: var(--btn-hover); color: var(--text); }
+  #tree .kids { padding-left: 11px; border-left: 1px solid var(--border); margin-left: 9px; }
+  #tree .file { display: flex; align-items: center; gap: 5px; cursor: pointer;
+    padding: 3px 6px 3px 15px; border-radius: 5px; color: var(--text);
+    white-space: nowrap; overflow: hidden; }
+  /* A long name is cut with an ellipsis, never scrolled to. `text-overflow` does nothing
+     on the flex rows above — it truncates a box's own inline content, not a flex item —
+     and a flex item will not shrink under its text without `min-width: 0`. So the name
+     gets a box of its own, and the whole of it lives in the row's tooltip. */
+  #tree .nm { flex: 1; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #tree .file.on { background: var(--input-bg); color: var(--accent); }
+  #tree .ic { flex: none; width: 14px; text-align: center; }
+  #reader header { display: flex; align-items: baseline; gap: 10px;
+    padding: 14px 18px 10px; border-bottom: 1px solid var(--border); }
+  #reader h2 { margin: 0; font-size: 15px; font-weight: 600; }
+  #reader .path { color: var(--muted); font-size: 11.5px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  #reader button { margin-left: auto; background: none; border: 0; padding: 0 2px;
+    color: var(--muted); font: inherit; font-size: 15px; cursor: pointer; }
+  #reader button + button { margin-left: 0; }
+  #reader button:hover { color: var(--text); }
+  #tags { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 18px 0; font-size: 11.5px; }
+  #tags span { color: var(--muted); background: var(--input-bg);
+    border: 1px solid var(--input-border); border-radius: 999px; padding: 2px 8px; }
+  /* Long notes are the hard case, not short ones. The gap between paragraphs has to beat
+     the gap between lines or the two read as one block, so leading and paragraph margin
+     are set together and headings get a step of size and colour rather than weight alone. */
+  #body { padding: 4px 18px 32px; overflow: auto; font-size: 14px; line-height: 1.75; }
+  #body h1, #body h2, #body h3, #body h4, #body h5, #body h6 {
+    margin: 1.9em 0 .6em; line-height: 1.3; font-size: 1em; color: var(--heading); }
+  #body h1 { font-size: 1.45em; }
+  #body h2 { font-size: 1.25em; padding-bottom: .3em; border-bottom: 1px solid var(--border); }
+  #body h3 { font-size: 1.1em; color: var(--accent); }
+  #body h4, #body h5, #body h6 { color: var(--accent); opacity: .85; }
+  /* The first block sits against the header; only the ones after it need air above. */
+  #body > :first-child { margin-top: 0; }
+  #body p, #body ul, #body ol, #body pre, #body blockquote { margin: 1em 0; }
+  #body ul, #body ol { padding-left: 1.4em; }
+  #body li { margin: .4em 0; }
+  #body li::marker { color: var(--accent); }
+  #body strong, #body b { color: var(--strong); font-weight: 600; }
+  #body em, #body i { color: var(--heading); }
+  #body code { background: var(--input-bg); border: 1px solid var(--input-border);
+    color: var(--code); border-radius: 4px; padding: .1em .35em; font-size: .88em; }
+  #body pre { background: var(--input-bg); border: 1px solid var(--input-border);
+    border-radius: 8px; padding: 10px 12px; overflow-x: auto; }
+  #body pre code { background: none; border: 0; padding: 0; }
+  #body blockquote { margin-left: 0; padding: .6em 14px; color: var(--muted);
+    background: var(--input-bg); border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0; }
+  #body blockquote > :first-child { margin-top: 0; }
+  #body blockquote > :last-child { margin-bottom: 0; }
+  #body hr { border: 0; border-top: 1px solid var(--border); margin: 1.8em 0; }
+  #body table { border-collapse: collapse; margin: .8em 0; font-size: .95em; }
+  #body .scroll { overflow-x: auto; margin: .8em 0; }
+  #body th, #body td { border: 1px solid var(--border); padding: .35em .6em; vertical-align: top; }
+  #body th { background: var(--input-bg); color: var(--heading); font-weight: 600; text-align: left; }
+  #body img { max-width: 100%; border-radius: 6px; }
+  #body del { color: var(--muted); }
+  #body sup.fn { color: var(--accent); font-size: .72em; cursor: help; padding-left: .1em; }
+  #body ol.fn { color: var(--muted); font-size: .92em; }
+  #body li > ul, #body li > ol { margin: .2em 0; }
+  #body a { color: var(--accent); }
+  #body .wiki { color: var(--accent); border-bottom: 1px dotted var(--accent); cursor: pointer; }
+  #body .wiki.missing { color: var(--muted); border-bottom-color: var(--muted); cursor: default; }
+  #body .empty { color: var(--muted); font-style: italic; }
+  #picker { position: fixed; inset: 0; z-index: 30; display: flex; background: var(--bg);
+    align-items: center; justify-content: center; padding: 20px; }
+  /* An id beats [hidden] on specificity, so the attribute needs saying again here. */
+  #picker[hidden] { display: none; }
+  #picker .card { width: min(460px, 100%); color: var(--text); }
+  #picker h1 { margin: 0 0 4px; font-size: 20px; font-weight: 600; }
+  #picker p { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+  #picker form { display: flex; gap: 8px; }
+  #vaultpath { flex: 1; background: var(--input-bg); color: var(--text);
+    border: 1px solid var(--input-border); border-radius: 8px; padding: 9px 11px;
+    font: inherit; font-size: 13px; }
+  #picker button { background: var(--btn-bg); color: var(--text); cursor: pointer;
+    border: 1px solid var(--input-border); border-radius: 8px; padding: 9px 16px; font: inherit; }
+  #picker button:hover { background: var(--btn-hover); }
+  #pickerr { color: #f87171; min-height: 1.2em; margin: 10px 0 0; }
+  #recent { margin-top: 14px; }
+  #recent b { color: var(--muted); font-size: 11px; text-transform: uppercase;
+    letter-spacing: .08em; font-weight: 600; }
+  #recent div { padding: 7px 2px; cursor: pointer; font-size: 13px; color: var(--accent); }
+  #recent div:hover { text-decoration: underline; }
+  #hint { position: fixed; left: calc(min(var(--panel-w), 92vw) + 16px); top: 16px;
+    z-index: 10; max-width: 260px;
+    font-size: 12.5px; line-height: 1.5; color: var(--muted); opacity: .75; user-select: none; }
+  #hint b { color: var(--text); font-weight: 600; opacity: .9; }
