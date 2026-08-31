@@ -1,9 +1,10 @@
 //! How notes are grouped, coloured and paced, and what structure holds them together.
 //! Two adapters satisfy this interface: a generic folder layout and an AI Workshop OS
-//! layout. Everything that differs between them is decided here, once.
+//! layout. Everything that differs between them is decided here, once. The generic
+//! layout groups by frontmatter `type` instead of by folder when the notes declare one.
 
 use crate::node::NodeId;
-use crate::vault::Vault;
+use crate::vault::{Note, Vault};
 use std::collections::HashMap;
 
 const PALETTE: [&str; 12] = [
@@ -71,40 +72,34 @@ impl Layout {
         }];
         let mut group_of = HashMap::new();
 
-        // One group per top-level folder, smallest first so the growth starts tight.
-        let mut tops: Vec<(String, Vec<&str>)> = Vec::new();
-        for rel in vault.paths() {
-            let top = rel
-                .split_once('/')
-                .map_or("_root", |(top, _)| top)
-                .to_string();
-            match tops.iter_mut().find(|(name, _)| *name == top) {
-                Some((_, members)) => members.push(rel),
-                None => tops.push((top, vec![rel])),
+        // One group per top-level folder, smallest first so the growth starts tight. A
+        // note's section is where it lives; what it is about is its tags, which cut
+        // across folders and filter separately.
+        let mut tops: Vec<(String, String, Vec<&str>)> = Vec::new();
+        for note in &vault.notes {
+            let (key, name) = bucket(note);
+            match tops.iter_mut().find(|(k, _, _)| *k == key) {
+                Some((_, _, members)) => members.push(note.path.as_str()),
+                None => tops.push((key, name, vec![note.path.as_str()])),
             }
         }
-        tops.sort_by_key(|(_, members)| members.len());
+        tops.sort_by_key(|(_, _, members)| members.len());
 
-        for (i, (top, members)) in tops.iter().enumerate() {
-            let key = if top == "_root" { "root" } else { top.as_str() };
+        for (i, (key, name, members)) in tops.iter().enumerate() {
             let big = members.len() > 60;
             groups.push(Group {
-                key: key.to_string(),
+                key: key.clone(),
                 color: PALETTE[i % PALETTE.len()],
                 radius: if big { 3.5 } else { 6.0 },
                 glow: if big { 0.0 } else { 14.0 },
-                name: if key == "root" {
-                    "Loose notes".into()
-                } else {
-                    top.clone()
-                },
+                name: name.clone(),
                 pace: (2200 / members.len().max(1)).clamp(8, 400) as u32,
                 pause: 450,
                 major: !big,
                 cluster: false,
             });
             for rel in members {
-                group_of.insert(NodeId::Note((*rel).to_string()), key.to_string());
+                group_of.insert(NodeId::Note((*rel).to_string()), key.clone());
             }
         }
 
@@ -161,6 +156,14 @@ impl Layout {
         if !self.groups.iter().any(|g| g.key == "external") {
             self.groups.push(aios_groups().pop().unwrap());
         }
+    }
+}
+
+/// The group a note belongs to: its top-level folder, or the loose pile at the root.
+fn bucket(note: &Note) -> (String, String) {
+    match note.path.split_once('/') {
+        Some((top, _)) => (top.to_string(), top.to_string()),
+        None => ("root".into(), "Loose notes".into()),
     }
 }
 
@@ -257,6 +260,34 @@ mod tests {
         assert_eq!(layout.group_key(&NodeId::Note("big/1.md".into())), "big");
         assert_eq!(layout.group_key(&NodeId::Note("a.md".into())), "root");
         assert!(layout.keeps_isolates);
+    }
+
+    /// Groups are folders even where every note declares a `type`. An OKF bundle does,
+    /// and its concepts still group by the directory they sit in; the types themselves
+    /// belong in `tags`, which is the other, cross-cutting filter.
+    #[test]
+    fn folders_group_a_vault_that_declares_types() {
+        let vault = fixture(
+            false,
+            &[
+                ("tables/orders.md", "---\ntype: BigQuery Table\n---\n"),
+                ("metrics/revenue.md", "---\ntype: Metric\n---\n"),
+                ("metrics/churn.md", "---\ntype: Metric\n---\n"),
+                ("scratch.md", "no frontmatter"),
+            ],
+        );
+        let layout = Layout::generic(&vault);
+        let keys: Vec<&str> = layout.groups.iter().map(|g| g.key.as_str()).collect();
+        assert_eq!(keys, ["router", "tables", "root", "metrics"]);
+        assert_eq!(
+            layout.group_key(&NodeId::Note("metrics/churn.md".into())),
+            "metrics"
+        );
+        assert_eq!(
+            layout.group_key(&NodeId::Note("scratch.md".into())),
+            "root"
+        );
+        assert_eq!(layout.mode, "generic folder grouping");
     }
 
     #[test]
