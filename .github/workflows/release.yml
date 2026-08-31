@@ -1,0 +1,58 @@
+# A tag is the release. Pushing `v0.2.0` builds the binary, runs both suites against it,
+# and publishes the tarball the AUR package downloads — nothing here is run by hand.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Built on Arch itself, so the binary links the same library sonames the AUR package
+    # will install. A build on another distribution can disagree about webkit2gtk's ABI.
+    container: archlinux:base-devel
+    steps:
+      - name: Install the toolchain
+        run: pacman -Syu --noconfirm git rust nodejs pkgconf webkit2gtk-4.1
+
+      - uses: actions/checkout@v4
+
+      - name: The tag must be the version in Cargo.toml
+        run: |
+          tag=${GITHUB_REF_NAME#v}
+          crate=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          [ "$tag" = "$crate" ] || { echo "tag $GITHUB_REF_NAME but Cargo.toml says $crate"; exit 1; }
+
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+      - run: node tests/sim.mjs
+
+      - name: Pack the release
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          install -Dm755 target/release/brain-map dist/brain-map
+          install -Dm644 README.md LICENSE -t dist/
+          tar -C dist -czf "brain-map-$v-x86_64.tar.gz" .
+          sha256sum "brain-map-$v-x86_64.tar.gz" | tee sha256sums.txt
+
+      # The AUR package differs from the one in the repo by two lines. Filling them here
+      # means the release ships a PKGBUILD that is already correct for it.
+      - name: Stamp the PKGBUILD for this release
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          sum=$(cut -d' ' -f1 sha256sums.txt)
+          sed -e "s/^pkgver=.*/pkgver=$v/" \
+              -e "s/^sha256sums=.*/sha256sums=('$sum')/" \
+              packaging/aur/PKGBUILD > PKGBUILD
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            brain-map-*-x86_64.tar.gz
+            sha256sums.txt
+            PKGBUILD
