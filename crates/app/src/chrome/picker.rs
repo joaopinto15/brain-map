@@ -1,7 +1,7 @@
 //! Choosing the vault. Nothing is open until this names something, and the folder dialog
-//! is the desktop's because typing a path is not how anyone finds one. A git URL names
-//! one too: the scanner clones it and opens the clone, so importing a vault is the same
-//! field and the same button.
+//! is the desktop's because typing a path is not how anyone finds one. A git URL and an
+//! rclone remote name one too: the scanner fetches either into the cache and opens the
+//! copy, so importing a vault is the same field and the same button as opening one.
 
 use super::floating;
 use crate::app::Session;
@@ -34,7 +34,7 @@ impl Picker {
                 ui.heading(RichText::new("brain-map").color(color(theme.heading)));
                 ui.label(
                     RichText::new(
-                        "Open a folder of markdown notes as a vault, or a git URL to import one.",
+                        "Open a folder of markdown notes as a vault — or a git URL or a drive to import one.",
                     )
                     .color(color(theme.muted)),
                 );
@@ -42,7 +42,7 @@ impl Picker {
                 ui.horizontal(|ui| {
                     let field = ui.add(
                         egui::TextEdit::singleline(&mut self.typed)
-                            .hint_text("~/notes or https://github.com/you/notes")
+                            .hint_text("~/notes · https://github.com/you/notes · gdrive:notes")
                             .desired_width(340.0),
                     );
                     if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {

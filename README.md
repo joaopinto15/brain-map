@@ -29,16 +29,37 @@ nix run .              # pick the vault in the window
 nix run . -- ~/notes   # or name it and skip the picker
 ```
 
-A git URL opens too, on the command line and in the picker:
+## Import a vault
+
+A vault that is not on this machine yet is the same field and the same argument as one
+that is:
 
 ```sh
-nix run . -- https://github.com/you/notes
+brain-map https://github.com/you/notes   # any git remote: https, ssh, git@host:path
+brain-map gdrive:notes                   # any rclone remote: the drive, and a folder on it
 ```
 
-It is cloned under `$XDG_CACHE_HOME/brain-map/vaults` and opened from there; opening the
-same URL again fast-forwards the clone, and an offline machine still opens the last one.
-A vault on Google Drive or OneDrive is a local folder once their client syncs it, so
-those need nothing here.
+Either one is fetched into `$XDG_CACHE_HOME/brain-map/vaults` and opened from there.
+Opening it again brings down what changed, and an offline machine still opens the last
+import rather than nothing.
+
+Drives go through [rclone](https://rclone.org), which is where the accounts and the
+tokens already live — `rclone config` once, and the name you gave the remote is what you
+type here:
+
+| Drive | `rclone config` type | Then |
+|-------|----------------------|------|
+| Google Drive | `drive` | `brain-map gdrive:notes` |
+| OneDrive | `onedrive` | `brain-map onedrive:vaults/brain` |
+| Dropbox, S3, Nextcloud, SFTP, … | [any of the ~70](https://rclone.org/overview/) | `brain-map remote:path` |
+
+brain-map knows none of those providers by name: it runs `rclone copy`, so a drive rclone
+supports is a drive this supports. Notes are copied, never deleted — a note you edited
+from the window is not lost because the drive no longer has it — so a vault that has
+shrunk on the drive is refreshed by removing its folder under the cache.
+
+If the drive's own desktop client already syncs the vault into a local folder, open that
+folder and none of this applies.
 
 brain-map is one window and one process. There is no browser, no server and no port: it
 reads the vault off the disk and draws it, so the notes never leave the machine and
