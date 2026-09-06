@@ -40,22 +40,27 @@ jobs:
           tar -C dist -czf "brain-map-$v-x86_64.tar.gz" .
           sha256sum "brain-map-$v-x86_64.tar.gz" | tee sha256sums.txt
 
-      # The AUR package differs from the one in the repo by two lines. Filling them here
-      # means the release ships a PKGBUILD that is already correct for it — and a
-      # .SRCINFO beside it, which the AUR refuses a push without. makepkg will not run
-      # as root and this container is root, hence the user made to run it.
-      - name: Stamp the PKGBUILD and .SRCINFO for this release
+      # Both AUR packages differ from the ones in the repo by the version, and the binary
+      # one by its checksum too. Filling them here means the release ships a PKGBUILD
+      # that is already correct — and a .SRCINFO beside it, which the AUR refuses a push
+      # without. makepkg will not run as root and this container is root, hence the user
+      # made to run it. Rename each pair to PKGBUILD and .SRCINFO in the AUR checkout.
+      - name: Stamp the AUR packages for this release
         run: |
           v=${GITHUB_REF_NAME#v}
           sum=$(cut -d' ' -f1 sha256sums.txt)
-          sed -e "s/^pkgver=.*/pkgver=$v/" \
-              -e "s/^sha256sums=.*/sha256sums=('$sum')/" \
-              packaging/aur/PKGBUILD > PKGBUILD
           useradd --create-home builder
-          install -d -o builder /tmp/aur
-          install -o builder PKGBUILD /tmp/aur/PKGBUILD
-          su builder -c 'cd /tmp/aur && makepkg --printsrcinfo' > .SRCINFO
-          cat .SRCINFO
+          for pkg in brain-map brain-map-bin; do
+            install -d -o builder "/tmp/aur/$pkg"
+            sed "s/^pkgver=.*/pkgver=$v/" "packaging/aur/$pkg/PKGBUILD" > "$pkg.PKGBUILD"
+            # Only the binary package has a tarball to check; the source one clones a tag.
+            if [ "$pkg" = brain-map-bin ]; then
+              sed -i "s/^sha256sums=.*/sha256sums=('$sum')/" "$pkg.PKGBUILD"
+            fi
+            install -o builder "$pkg.PKGBUILD" "/tmp/aur/$pkg/PKGBUILD"
+            su builder -c "cd /tmp/aur/$pkg && makepkg --printsrcinfo" > "$pkg.SRCINFO"
+            cat "$pkg.SRCINFO"
+          done
 
       - uses: softprops/action-gh-release@v2
         with:
@@ -63,5 +68,7 @@ jobs:
           files: |
             brain-map-*-x86_64.tar.gz
             sha256sums.txt
-            PKGBUILD
-            .SRCINFO
+            brain-map.PKGBUILD
+            brain-map.SRCINFO
+            brain-map-bin.PKGBUILD
+            brain-map-bin.SRCINFO

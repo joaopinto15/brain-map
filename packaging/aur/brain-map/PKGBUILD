@@ -1,0 +1,62 @@
+# Maintainer: João Pinto <pintojad03@gmail.com>
+#
+# The source of truth for the AUR `brain-map` package, which builds from the tagged
+# source. `pkgver` is a placeholder here; the release workflow stamps it and attaches the
+# finished PKGBUILD and .SRCINFO to the GitHub release.
+#
+# `brain-map-bin` is the same program from the published binary, for anyone who would
+# rather not compile it.
+
+pkgname=brain-map
+pkgver=0.0.0
+pkgrel=1
+pkgdesc="Turns a folder of markdown notes into an interactive knowledge graph"
+arch=('x86_64' 'aarch64')
+url="https://github.com/joaopinto15/brain-map"
+license=('MIT')
+# The window draws itself, so there is no browser engine here: this is what it opens
+# with — the display protocols, the keyboard map, and GL.
+# noto-fonts-emoji is where the icons come from: the window reads the colour bitmaps
+# out of it directly, so without it every icon is a grey outline.
+depends=('noto-fonts-emoji' 'libglvnd' 'libxkbcommon' 'wayland' 'libx11' 'libxcursor' 'libxrandr' 'libxi')
+makedepends=('cargo' 'git')
+optdepends=(
+  'git: import a vault from a git URL'
+  'rclone: import a vault from Google Drive, OneDrive or another drive'
+  'zenity: folder dialog for the vault picker'
+  'kdialog: folder dialog for the vault picker, on KDE'
+  'xdg-utils: open a link in a note in your browser'
+)
+conflicts=("$pkgname-bin")
+# The tag, not GitHub's generated tarball: a clone of a tag is the same bytes every time
+# and needs no checksum kept in step with it.
+source=("$pkgname::git+$url.git#tag=v$pkgver")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')"
+}
+
+build() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  # The whole workspace runs on the host: the scanner, and the half of the window that
+  # never opens one.
+  cargo test --frozen --workspace
+}
+
+package() {
+  cd "$pkgname"
+  install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
