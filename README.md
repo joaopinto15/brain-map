@@ -126,10 +126,10 @@ texture. Install `noto-fonts-emoji` — the Nix package ships its own copy — o
 `$BRAIN_MAP_EMOJI_FONT` at a font of your own.
 
 The split the browser drew is still there, as a trait. `Source` in `crates/model` is the
-six things the window may ask for — scan the vault, fingerprint it, read a note, open one
-in `$EDITOR`, show a folder dialog, and turn a typed path or URL into a vault — and it is
-implemented once, in `src/main.rs`. Those were six HTTP routes when the page ran in a
-browser. Nothing on the window's side of that trait can touch the disk, which is why most
+everything the window may ask for — scan the vault, fingerprint it, read a note, open one
+in `$EDITOR`, show a folder dialog, list the drives, and turn what was typed into a vault
+— and it is implemented once, in `src/main.rs`. Six of those were HTTP routes when the
+page ran in a browser. Nothing on the window's side of that trait can touch the disk, which is why most
 of `crates/app` is tested with a plain `cargo test` and no window: the force simulation,
 the note renderer, link resolution, the keymap, the legend filter and the theme table all
 run on the host.

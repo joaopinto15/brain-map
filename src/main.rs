@@ -51,6 +51,10 @@ impl Source for Disk {
     fn open_vault(&self, typed: &str) -> Result<PathBuf, String> {
         open_vault(typed)
     }
+
+    fn drives(&self) -> Vec<String> {
+        drives()
+    }
 }
 
 fn main() {
@@ -199,6 +203,20 @@ fn drive_name(source: &str) -> Option<String> {
             .collect::<Vec<_>>()
             .join("-"),
     )
+}
+
+/// The drives rclone has been configured with, `remote:` each — it prints them exactly as
+/// they are typed. No rclone and no config are the same answer: nothing to offer.
+fn drives() -> Vec<String> {
+    let Ok(done) = Command::new("rclone").arg("listremotes").output() else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&done.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.ends_with(':'))
+        .map(str::to_string)
+        .collect()
 }
 
 /// Where clones live: one folder under the desktop's cache, beside nothing else of ours.

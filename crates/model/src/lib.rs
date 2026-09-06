@@ -67,10 +67,11 @@ pub fn is_structural(id: &str) -> bool {
 
 /// Where the graph comes from, and the things the page cannot do for itself.
 ///
-/// These six were once six HTTP routes and the page fetched them. The page is a window
+/// Six of these were once six HTTP routes and the page fetched them. The page is a window
 /// now and calls them directly, but the split they draw is the same one: the page asks,
 /// the scanner answers, and neither side can see the other's insides. Everything that
-/// touches the disk or the desktop is on this side of the line.
+/// touches the disk or the desktop is on this side of the line, which is why the drives
+/// joined it rather than the picker learning to run a program.
 pub trait Source {
     /// The whole vault, rescanned. `/graph.json` was this.
     fn scan(&self, vault: &Path) -> Graph;
@@ -82,6 +83,9 @@ pub trait Source {
     fn edit(&self, vault: &Path, rel: &str);
     /// The desktop's folder chooser. `Ok(None)` means the dialog was cancelled.
     fn choose_folder(&self) -> Result<Option<String>, String>;
-    /// A typed path becomes a vault, or says why it does not.
+    /// A typed path, git URL or drive becomes a vault, or says why it does not.
     fn open_vault(&self, typed: &str) -> Result<PathBuf, String>;
+    /// The drives that are configured to import from, `remote:` each. Empty when there
+    /// is no rclone, which is what hides them from the picker.
+    fn drives(&self) -> Vec<String>;
 }

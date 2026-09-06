@@ -112,8 +112,8 @@ _Avoid_: sidebar, tree view, navigator, panel
 
 **Source**:
 Everything the window may ask of the machine — scan a vault, fingerprint it, read a note,
-open one in an editor, show a folder dialog, turn a typed path, git URL or drive into a
-vault.
+open one in an editor, show a folder dialog, list the drives, turn a typed path, git URL
+or drive into a vault.
 Implemented by
 the scanner; nothing on the window's side of it touches the disk.
 _Avoid_: backend, service, provider, repository, API
