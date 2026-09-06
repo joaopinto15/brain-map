@@ -118,10 +118,19 @@ fn choose_folder() -> Result<Option<String>, String> {
 }
 
 /// A typed path becomes a vault: `~` and `$HOME` expand, and it has to be a directory.
+/// A git URL is a vault too — it is cloned into the cache and the clone is what opens,
+/// which is the whole of importing one.
 fn open_vault(path: &str) -> Result<PathBuf, String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
         return Err("no path given".into());
+    }
+    if let Some(name) = clone_name(trimmed) {
+        let dir = cache_dir()?.join(name);
+        clone(trimmed, &dir)?;
+        return dir
+            .canonicalize()
+            .map_err(|e| format!("{}: {e}", dir.display()));
     }
     let expanded = match std::env::var("HOME") {
         Ok(home) if trimmed == "~" => home,
@@ -134,6 +143,87 @@ fn open_vault(path: &str) -> Result<PathBuf, String> {
         return Err(format!("not a directory: {expanded}"));
     }
     dir.canonicalize().map_err(|e| format!("{expanded}: {e}"))
+}
+
+/// The folder a remote is cloned into, or `None` when what was typed is a path. A remote
+/// is a URL or an `scp`-style address; the last two segments name the clone, so two
+/// vaults called `notes` under different owners do not land on each other.
+fn clone_name(remote: &str) -> Option<String> {
+    let rest = match remote.split_once("://") {
+        Some((_, rest)) => rest,
+        None => remote.strip_prefix("git@")?,
+    };
+    let segments: Vec<&str> = rest
+        .trim_end_matches('/')
+        .split(['/', ':'])
+        .filter(|s| !s.is_empty() && *s != "." && *s != "..")
+        .collect();
+    let name = segments
+        .iter()
+        .rev()
+        .take(2)
+        .rev()
+        .copied()
+        .collect::<Vec<_>>()
+        .join("-");
+    let name = name.trim_end_matches(".git").to_string();
+    (!name.is_empty()).then_some(name)
+}
+
+/// Where clones live: one folder under the desktop's cache, beside nothing else of ours.
+fn cache_dir() -> Result<PathBuf, String> {
+    let root = std::env::var("XDG_CACHE_HOME")
+        .ok()
+        .filter(|c| !c.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".cache"))
+        })
+        .ok_or("no $XDG_CACHE_HOME and no $HOME to clone into")?;
+    let dir = root.join("brain-map/vaults");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    Ok(dir)
+}
+
+/// Fetch the remote into `dir`: cloned the first time, fast-forwarded after. A pull that
+/// fails opens what is already there — an offline machine still has the last import.
+// ponytail: this blocks the frame, the way the folder dialog does. Progress means
+// threading `Source`, and an import happens once.
+fn clone(remote: &str, dir: &Path) -> Result<(), String> {
+    let argv: Vec<&str> = match dir.join(".git").is_dir() {
+        true => vec!["-C", dir.to_str().unwrap_or_default(), "pull", "--ff-only"],
+        false => vec![
+            "clone",
+            "--depth",
+            "1",
+            remote,
+            dir.to_str().unwrap_or_default(),
+        ],
+    };
+    let refreshing = argv[0] == "-C";
+    let done = Command::new("git")
+        .args(&argv)
+        .output()
+        .map_err(|e| format!("git: {e} — install git to import a vault from a URL"))?;
+    if done.status.success() {
+        return Ok(());
+    }
+    let complaint = String::from_utf8_lossy(&done.stderr).trim().to_string();
+    match refreshing {
+        true => {
+            eprintln!(
+                "brain-map: {} is not up to date: {complaint}",
+                dir.display()
+            );
+            Ok(())
+        }
+        false => {
+            let _ = std::fs::remove_dir_all(dir);
+            Err(format!("git clone {remote}: {complaint}"))
+        }
+    }
 }
 
 /// Terminal emulators that take the command to run after this flag. `$TERMINAL` wins when
@@ -325,6 +415,28 @@ mod tests {
         );
         unsafe { std::env::set_var("PATH", path) };
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_url_names_the_folder_it_is_cloned_into() {
+        assert_eq!(
+            clone_name("https://github.com/joaopinto15/brain-map.git").as_deref(),
+            Some("joaopinto15-brain-map"),
+            "the owner comes along, so two vaults called notes do not collide"
+        );
+        assert_eq!(
+            clone_name("git@github.com:me/notes.git").as_deref(),
+            Some("me-notes"),
+            "an scp-style address is a remote too"
+        );
+        assert_eq!(
+            clone_name("ssh://host/srv/git/notes/").as_deref(),
+            Some("git-notes"),
+            "a trailing slash names nothing"
+        );
+        assert_eq!(clone_name("~/notes"), None, "a path is not a remote");
+        assert_eq!(clone_name("/home/me/notes"), None);
+        assert_eq!(clone_name("notes"), None);
     }
 
     #[test]

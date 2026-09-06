@@ -5,12 +5,40 @@ vault, watch it assemble itself node by node, then walk it.
 
 ![How brain-map works: pick a vault, it draws the graph, you read and search and edit from the window](docs/overview.svg)
 
+## Install it
+
+```sh
+yay -S brain-map-bin                          # Arch, from the AUR
+nix profile install github:joaopinto15/brain-map   # anywhere Nix runs
+```
+
+Or run it without installing:
+
+```sh
+nix run github:joaopinto15/brain-map           # pick the vault in the window
+nix run github:joaopinto15/brain-map -- ~/notes   # or name it and skip the picker
+```
+
+Linux only for now — the window opens on Wayland or X11, and there is no Windows or
+macOS build to package.
+
 ## Run it
 
 ```sh
 nix run .              # pick the vault in the window
 nix run . -- ~/notes   # or name it and skip the picker
 ```
+
+A git URL opens too, on the command line and in the picker:
+
+```sh
+nix run . -- https://github.com/you/notes
+```
+
+It is cloned under `$XDG_CACHE_HOME/brain-map/vaults` and opened from there; opening the
+same URL again fast-forwards the clone, and an offline machine still opens the last one.
+A vault on Google Drive or OneDrive is a local folder once their client syncs it, so
+those need nothing here.
 
 brain-map is one window and one process. There is no browser, no server and no port: it
 reads the vault off the disk and draws it, so the notes never leave the machine and
@@ -78,7 +106,7 @@ texture. Install `noto-fonts-emoji` — the Nix package ships its own copy — o
 
 The split the browser drew is still there, as a trait. `Source` in `crates/model` is the
 six things the window may ask for — scan the vault, fingerprint it, read a note, open one
-in `$EDITOR`, show a folder dialog, and turn a typed path into a vault — and it is
+in `$EDITOR`, show a folder dialog, and turn a typed path or URL into a vault — and it is
 implemented once, in `src/main.rs`. Those were six HTTP routes when the page ran in a
 browser. Nothing on the window's side of that trait can touch the disk, which is why most
 of `crates/app` is tested with a plain `cargo test` and no window: the force simulation,

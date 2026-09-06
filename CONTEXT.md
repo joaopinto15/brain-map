@@ -12,6 +12,12 @@ A folder of markdown notes, opened as one graph. It is the unit the program open
 and watches.
 _Avoid_: workspace, library, collection, directory
 
+**Import**:
+Opening a vault that is not on this machine yet: a git URL is cloned into the cache and
+the clone is the vault from then on. It is the same field, the same button and the same
+`Source` method as a path — there is no separate importer.
+_Avoid_: sync, download, fetch, clone
+
 **Note**:
 One `.md` file inside a vault. Every note is a node.
 _Avoid_: document, page, file, entry
@@ -99,7 +105,8 @@ _Avoid_: sidebar, tree view, navigator, panel
 
 **Source**:
 Everything the window may ask of the machine — scan a vault, fingerprint it, read a note,
-open one in an editor, show a folder dialog, turn a typed path into a vault. Implemented by
+open one in an editor, show a folder dialog, turn a typed path or git URL into a vault.
+Implemented by
 the scanner; nothing on the window's side of it touches the disk.
 _Avoid_: backend, service, provider, repository, API
 
