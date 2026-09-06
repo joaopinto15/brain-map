@@ -147,6 +147,10 @@ impl Session {
         self.source.choose_folder()
     }
 
+    pub fn drives(&self) -> Vec<String> {
+        self.source.drives()
+    }
+
     pub fn edit_open_note(&self) {
         if let (Some(vault), Some(id)) = (self.vault.as_deref(), self.reading_id()) {
             self.source.edit(vault, &id);

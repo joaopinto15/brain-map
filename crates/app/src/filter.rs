@@ -1,6 +1,9 @@
 //! The legend and what clicking it does. A group holds every note in it, a tag only the
 //! notes that declare it — and the lit set the filter produces is the same one the
 //! click/hover focus uses, so there is only ever one way to dim the graph.
+//!
+//! The picker's search of the remembered vaults is here too: it narrows a list by what
+//! was typed, which is the same job, and it is tested the same way — without a window.
 
 use crate::sim::Node;
 
@@ -16,6 +19,24 @@ impl Filter {
             Filter::Group(key) | Filter::Tag(key) => key,
         }
     }
+}
+
+/// A bare word is a search of the vaults you have opened; anything carrying a separator
+/// is a location to open, so typing a path is never hijacked by a vault whose name
+/// happens to contain it.
+pub fn is_search(typed: &str) -> bool {
+    !typed.is_empty() && !typed.contains(['/', '\\', ':', '~'])
+}
+
+/// The remembered vaults a typed search names, most recent first and case blind. An empty
+/// search names all of them, which is the list the picker shows before anything is typed.
+pub fn vault_search<'a>(recent: &'a [String], typed: &str) -> Vec<&'a str> {
+    let wanted = typed.trim().to_lowercase();
+    recent
+        .iter()
+        .filter(|path| path.to_lowercase().contains(&wanted))
+        .map(String::as_str)
+        .collect()
 }
 
 pub fn matches(node: &Node, filter: Option<&Filter>) -> bool {
@@ -61,6 +82,46 @@ pub fn top_tags(nodes: &[Node], limit: usize) -> Vec<(String, usize)> {
 /// baseline — treating it as a change would reload the page forever.
 pub fn changed<T: PartialEq + ?Sized>(mark: Option<&T>, now: &T) -> bool {
     mark.is_some_and(|mark| mark != now)
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+
+    #[test]
+    fn a_word_searches_and_a_path_opens() {
+        let recent = vec![
+            "/home/me/uni/notes".to_string(),
+            "/home/me/notes".to_string(),
+            "/home/me/work".to_string(),
+        ];
+        assert_eq!(
+            vault_search(&recent, "UNI"),
+            vec!["/home/me/uni/notes"],
+            "case blind, and it searches the whole path"
+        );
+        assert_eq!(
+            vault_search(&recent, "notes"),
+            vec!["/home/me/uni/notes", "/home/me/notes"],
+            "most recent first, which is the order the list is kept in"
+        );
+        assert_eq!(
+            vault_search(&recent, "").len(),
+            3,
+            "everything, before anything is typed"
+        );
+        assert!(vault_search(&recent, "nothing here").is_empty());
+
+        assert!(is_search("uni"), "a bare word");
+        assert!(!is_search(""), "nothing typed is not a search");
+        assert!(!is_search("~/notes"), "a path is a location");
+        assert!(!is_search("/home/me/notes"));
+        assert!(!is_search("gdrive:notes"), "a drive is a location");
+        assert!(
+            !is_search("https://github.com/you/notes"),
+            "so is a URL, or its host would find a vault instead"
+        );
+    }
 }
 
 #[cfg(test)]

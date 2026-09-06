@@ -5,12 +5,61 @@ vault, watch it assemble itself node by node, then walk it.
 
 ![How brain-map works: pick a vault, it draws the graph, you read and search and edit from the window](docs/overview.svg)
 
+## Install it
+
+```sh
+yay -S brain-map-bin                          # Arch, from the AUR
+nix profile install github:joaopinto15/brain-map   # anywhere Nix runs
+```
+
+Or run it without installing:
+
+```sh
+nix run github:joaopinto15/brain-map           # pick the vault in the window
+nix run github:joaopinto15/brain-map -- ~/notes   # or name it and skip the picker
+```
+
+Linux only for now — the window opens on Wayland or X11, and there is no Windows or
+macOS build to package.
+
 ## Run it
 
 ```sh
 nix run .              # pick the vault in the window
 nix run . -- ~/notes   # or name it and skip the picker
 ```
+
+## Import a vault
+
+A vault that is not on this machine yet is the same field and the same argument as one
+that is:
+
+```sh
+brain-map https://github.com/you/notes   # any git remote: https, ssh, git@host:path
+brain-map gdrive:notes                   # any rclone remote: the drive, and a folder on it
+```
+
+Either one is fetched into `$XDG_CACHE_HOME/brain-map/vaults` and opened from there.
+Opening it again brings down what changed, and an offline machine still opens the last
+import rather than nothing.
+
+Drives go through [rclone](https://rclone.org), which is where the accounts and the
+tokens already live — `rclone config` once, and the name you gave the remote is what you
+type here:
+
+| Drive | `rclone config` type | Then |
+|-------|----------------------|------|
+| Google Drive | `drive` | `brain-map gdrive:notes` |
+| OneDrive | `onedrive` | `brain-map onedrive:vaults/brain` |
+| Dropbox, S3, Nextcloud, SFTP, … | [any of the ~70](https://rclone.org/overview/) | `brain-map remote:path` |
+
+brain-map knows none of those providers by name: it runs `rclone copy`, so a drive rclone
+supports is a drive this supports. Notes are copied, never deleted — a note you edited
+from the window is not lost because the drive no longer has it — so a vault that has
+shrunk on the drive is refreshed by removing its folder under the cache.
+
+If the drive's own desktop client already syncs the vault into a local folder, open that
+folder and none of this applies.
 
 brain-map is one window and one process. There is no browser, no server and no port: it
 reads the vault off the disk and draws it, so the notes never leave the machine and
@@ -77,10 +126,10 @@ texture. Install `noto-fonts-emoji` — the Nix package ships its own copy — o
 `$BRAIN_MAP_EMOJI_FONT` at a font of your own.
 
 The split the browser drew is still there, as a trait. `Source` in `crates/model` is the
-six things the window may ask for — scan the vault, fingerprint it, read a note, open one
-in `$EDITOR`, show a folder dialog, and turn a typed path into a vault — and it is
-implemented once, in `src/main.rs`. Those were six HTTP routes when the page ran in a
-browser. Nothing on the window's side of that trait can touch the disk, which is why most
+everything the window may ask for — scan the vault, fingerprint it, read a note, open one
+in `$EDITOR`, show a folder dialog, list the drives, and turn what was typed into a vault
+— and it is implemented once, in `src/main.rs`. Six of those were HTTP routes when the
+page ran in a browser. Nothing on the window's side of that trait can touch the disk, which is why most
 of `crates/app` is tested with a plain `cargo test` and no window: the force simulation,
 the note renderer, link resolution, the keymap, the legend filter and the theme table all
 run on the host.

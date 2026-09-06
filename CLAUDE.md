@@ -46,7 +46,8 @@ Three crates, and one seam between them.
 `fingerprint`, `read_note`, `edit`, `choose_folder`, `open_vault` were `/graph.json`,
 `/changed`, `/note`, `/edit`, `/browse`, `/open`. Keep it that way. A new thing the
 window needs from the machine is a method here, implemented in `src/main.rs` — never a
-`std::fs` call inside `crates/app`.
+`std::fs` call inside `crates/app`. `drives` is the one that was never a route: the start
+page lists what rclone is configured with, and running a program is the scanner's job.
 
 ### The scanner
 
@@ -80,7 +81,7 @@ never mentions egui, and that half is where the tests are:
 | `markdown.rs` | `Parser` and `Inline`: a note as `Block`s and `Span`s | no |
 | `links.rs` | resolving a link target back to a note | no |
 | `tree.rs` | the vault as a folder tree | no |
-| `filter.rs` | the legend filter, its counts, and the watcher's baseline rule | no |
+| `filter.rs` | the legend filter, its counts, the picker's vault search, and the watcher's baseline rule | no |
 | `settings.rs` | `Settings`: the config file, read once and written through | no |
 | `keys.rs` | the keymap, and what egui's `Key` is called in it | almost |
 | `theme.rs` | the `THEMES` table, its colours, egui's `Visuals`, group colours | almost |
@@ -163,6 +164,13 @@ search text, the picker owns the path being typed.
 - The explorer's width lives in one place, `Ui::panel_w`, and `Engine::set_panel` is the
   only writer. The grip and the settings slider both go through it; nothing reads a
   literal.
+- The picker is the start page, so it is the only thing on screen until a vault is open:
+  `Chrome::show` draws the bar, the hint, the explorer and the legend only once
+  `graph().vault` is set, since an empty count and a legend with no rows say nothing. One
+  field takes a path, a git URL and a drive because the scanner decides which it is;
+  `filter::is_search` decides the other way, that a bare word searches the vaults already
+  opened instead of naming a new one. Esc closes the picker only when there is a vault
+  behind it — `chrome/keymap.rs` guards that, or the window would have no way back.
 - The reader's two states are `Ui::reading` and `Ui::full`: reading swaps the folder tree
   for the note, full gives the panel the window. `Engine::close_note` clears both — a
   full-width panel holding nothing would cover the graph with no way back — and `F`

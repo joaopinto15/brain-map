@@ -12,6 +12,19 @@ A folder of markdown notes, opened as one graph. It is the unit the program open
 and watches.
 _Avoid_: workspace, library, collection, directory
 
+**Import**:
+Opening a vault that is not on this machine yet: a git remote is cloned into the cache, an
+rclone remote is copied there, and that folder is the vault from then on. It is the same
+field, the same button and the same `Source` method as a path — there is no separate
+importer, and no provider is named anywhere in the program.
+_Avoid_: sync, download, fetch, clone
+
+**Drive**:
+A vault held by a storage service — Google Drive, OneDrive, Dropbox and the rest — reached
+as `remote:path` through rclone, which holds the account. brain-map has no idea which
+service it is.
+_Avoid_: cloud, provider, backend, mount
+
 **Note**:
 One `.md` file inside a vault. Every note is a node.
 _Avoid_: document, page, file, entry
@@ -99,7 +112,9 @@ _Avoid_: sidebar, tree view, navigator, panel
 
 **Source**:
 Everything the window may ask of the machine — scan a vault, fingerprint it, read a note,
-open one in an editor, show a folder dialog, turn a typed path into a vault. Implemented by
+open one in an editor, show a folder dialog, list the drives, turn a typed path, git URL
+or drive into a vault.
+Implemented by
 the scanner; nothing on the window's side of it touches the disk.
 _Avoid_: backend, service, provider, repository, API
 

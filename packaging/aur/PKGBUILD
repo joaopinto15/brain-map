@@ -18,6 +18,8 @@ license=('MIT')
 # out of it directly, so without it every icon is a grey outline.
 depends=('noto-fonts-emoji' 'libglvnd' 'libxkbcommon' 'wayland' 'libx11' 'libxcursor' 'libxrandr' 'libxi')
 optdepends=(
+  'git: import a vault from a git URL'
+  'rclone: import a vault from Google Drive, OneDrive or another drive'
   'zenity: folder dialog for the vault picker'
   'kdialog: folder dialog for the vault picker, on KDE'
   'xdg-utils: open a link in a note in your browser'

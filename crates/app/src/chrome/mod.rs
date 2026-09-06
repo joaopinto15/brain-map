@@ -36,10 +36,15 @@ impl Chrome {
     /// whatever is left, which is what keeps a drag in the explorer out of the camera.
     pub fn show(&mut self, ctx: &Context, session: &mut Session) {
         self.keymap.handle(ctx, session);
-        self.bar.show(ctx, session);
-        self.hint.show(ctx, session);
-        self.explorer.show(ctx, session);
-        self.legend.show(ctx, session);
+        // Before a vault is chosen there is nothing for any of these to be about: an
+        // empty count, a legend with no rows and the keys for a graph that is not drawn.
+        // The start page gets the window to itself.
+        if !session.engine.graph().vault.is_empty() {
+            self.bar.show(ctx, session);
+            self.hint.show(ctx, session);
+            self.explorer.show(ctx, session);
+            self.legend.show(ctx, session);
+        }
         self.settings.show(ctx, session);
         self.picker.show(ctx, session);
         self.viewport.show(ctx, session);

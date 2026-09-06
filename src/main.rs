@@ -51,6 +51,10 @@ impl Source for Disk {
     fn open_vault(&self, typed: &str) -> Result<PathBuf, String> {
         open_vault(typed)
     }
+
+    fn drives(&self) -> Vec<String> {
+        drives()
+    }
 }
 
 fn main() {
@@ -117,7 +121,12 @@ fn choose_folder() -> Result<Option<String>, String> {
     Err("no folder dialog found — install zenity or kdialog, or type the path".into())
 }
 
-/// A typed path becomes a vault: `~` and `$HOME` expand, and it has to be a directory.
+/// A typed source becomes a vault: `~` and `$HOME` expand, and a path has to be a
+/// directory. A git URL and an rclone remote are vaults too — both are fetched into the
+/// cache and the copy is what opens, which is the whole of importing one.
+///
+/// A directory that exists is always a path, so a folder whose name has a colon in it
+/// can never be mistaken for `remote:path`.
 fn open_vault(path: &str) -> Result<PathBuf, String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -130,10 +139,151 @@ fn open_vault(path: &str) -> Result<PathBuf, String> {
         _ => trimmed.to_string(),
     };
     let dir = PathBuf::from(&expanded);
-    if !dir.is_dir() {
-        return Err(format!("not a directory: {expanded}"));
+    if dir.is_dir() {
+        return dir.canonicalize().map_err(|e| format!("{expanded}: {e}"));
     }
-    dir.canonicalize().map_err(|e| format!("{expanded}: {e}"))
+    let imported = match (clone_name(trimmed), drive_name(trimmed)) {
+        (Some(name), _) => import(name, |dir| clone(trimmed, dir)),
+        (None, Some(name)) => import(name, |dir| copy(trimmed, dir)),
+        (None, None) => return Err(format!("not a directory: {expanded}")),
+    }?;
+    imported
+        .canonicalize()
+        .map_err(|e| format!("{}: {e}", imported.display()))
+}
+
+/// The imported vault's folder, once `fetch` has filled it.
+fn import(name: String, fetch: impl Fn(&Path) -> Result<(), String>) -> Result<PathBuf, String> {
+    let dir = cache_dir()?.join(name);
+    fetch(&dir)?;
+    Ok(dir)
+}
+
+/// The folder a remote is cloned into, or `None` when what was typed is a path. A remote
+/// is a URL or an `scp`-style address; the last two segments name the clone, so two
+/// vaults called `notes` under different owners do not land on each other.
+fn clone_name(remote: &str) -> Option<String> {
+    let rest = match remote.split_once("://") {
+        Some((_, rest)) => rest,
+        None => remote.strip_prefix("git@")?,
+    };
+    let segments: Vec<&str> = rest
+        .trim_end_matches('/')
+        .split(['/', ':'])
+        .filter(|s| !s.is_empty() && *s != "." && *s != "..")
+        .collect();
+    let name = segments
+        .iter()
+        .rev()
+        .take(2)
+        .rev()
+        .copied()
+        .collect::<Vec<_>>()
+        .join("-");
+    let name = name.trim_end_matches(".git").to_string();
+    (!name.is_empty()).then_some(name)
+}
+
+/// The folder an rclone remote is copied into, or `None` when what was typed names no
+/// remote. `remote:path` is rclone's own syntax and rclone is where Google Drive,
+/// OneDrive, Dropbox, S3 and the rest already live — it holds the accounts and the
+/// tokens, so this holds no provider at all and a new one costs nothing here.
+fn drive_name(source: &str) -> Option<String> {
+    let (remote, path) = source.split_once(':')?;
+    // `//` after the colon is a URL's scheme, not a remote's folder.
+    if remote.is_empty() || remote.contains(['/', '\\', ' ', '~', '.']) || path.starts_with("//") {
+        return None;
+    }
+    let segments = path
+        .split('/')
+        .filter(|s| !s.is_empty() && *s != "." && *s != "..");
+    Some(
+        std::iter::once(remote)
+            .chain(segments)
+            .collect::<Vec<_>>()
+            .join("-"),
+    )
+}
+
+/// The drives rclone has been configured with, `remote:` each — it prints them exactly as
+/// they are typed. No rclone and no config are the same answer: nothing to offer.
+fn drives() -> Vec<String> {
+    let Ok(done) = Command::new("rclone").arg("listremotes").output() else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&done.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.ends_with(':'))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Where clones live: one folder under the desktop's cache, beside nothing else of ours.
+fn cache_dir() -> Result<PathBuf, String> {
+    let root = std::env::var("XDG_CACHE_HOME")
+        .ok()
+        .filter(|c| !c.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".cache"))
+        })
+        .ok_or("no $XDG_CACHE_HOME and no $HOME to clone into")?;
+    let dir = root.join("brain-map/vaults");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    Ok(dir)
+}
+
+/// Clone the remote into `dir`, or fast-forward the clone already there.
+fn clone(remote: &str, dir: &Path) -> Result<(), String> {
+    let target = dir.to_str().unwrap_or_default();
+    match dir.join(".git").is_dir() {
+        true => fetch("git", &["-C", target, "pull", "--ff-only"], dir),
+        false => fetch("git", &["clone", "--depth", "1", remote, target], dir),
+    }
+}
+
+/// Copy the drive's folder into `dir`, and copy what has changed on every open after.
+///
+/// `copy`, never `sync`: sync deletes whatever the drive no longer has, and this folder
+/// is where an edit made from the window lands. A note deleted on the drive therefore
+/// stays until the folder is removed, which beats losing a note that was only ever here.
+fn copy(source: &str, dir: &Path) -> Result<(), String> {
+    let target = dir.to_str().unwrap_or_default();
+    fetch("rclone", &["copy", "--update", source, target], dir)
+}
+
+/// Run one fetch of a remote vault into `dir`. The first has to work — a failure leaves
+/// no half-vault behind — and a later one may fail: the last import is still on the disk
+/// and opening that beats opening nothing, so an offline machine still works.
+// ponytail: this blocks the frame, the way the folder dialog does. Progress means
+// threading `Source`, and an import happens once.
+fn fetch(program: &str, argv: &[&str], dir: &Path) -> Result<(), String> {
+    let fresh = !dir.is_dir();
+    let done = Command::new(program)
+        .args(argv)
+        .output()
+        .map_err(|e| match program {
+            "rclone" => format!(
+                "rclone: {e} — install rclone and run `rclone config` to import from a drive"
+            ),
+            _ => format!("{program}: {e} — install {program} to import a vault from a URL"),
+        })?;
+    if done.status.success() {
+        return Ok(());
+    }
+    let complaint = String::from_utf8_lossy(&done.stderr).trim().to_string();
+    if fresh {
+        let _ = std::fs::remove_dir_all(dir);
+        return Err(format!("{program} {}: {complaint}", argv.join(" ")));
+    }
+    eprintln!(
+        "brain-map: {} is not up to date: {complaint}",
+        dir.display()
+    );
+    Ok(())
 }
 
 /// Terminal emulators that take the command to run after this flag. `$TERMINAL` wins when
@@ -328,6 +478,59 @@ mod tests {
     }
 
     #[test]
+    fn a_url_names_the_folder_it_is_cloned_into() {
+        assert_eq!(
+            clone_name("https://github.com/joaopinto15/brain-map.git").as_deref(),
+            Some("joaopinto15-brain-map"),
+            "the owner comes along, so two vaults called notes do not collide"
+        );
+        assert_eq!(
+            clone_name("git@github.com:me/notes.git").as_deref(),
+            Some("me-notes"),
+            "an scp-style address is a remote too"
+        );
+        assert_eq!(
+            clone_name("ssh://host/srv/git/notes/").as_deref(),
+            Some("git-notes"),
+            "a trailing slash names nothing"
+        );
+        assert_eq!(clone_name("~/notes"), None, "a path is not a remote");
+        assert_eq!(clone_name("/home/me/notes"), None);
+        assert_eq!(clone_name("notes"), None);
+    }
+
+    #[test]
+    fn a_drive_names_the_folder_it_is_copied_into() {
+        assert_eq!(
+            drive_name("gdrive:uni/notes").as_deref(),
+            Some("gdrive-uni-notes"),
+            "the remote comes along, so two drives with a notes folder do not collide"
+        );
+        assert_eq!(
+            drive_name("onedrive:").as_deref(),
+            Some("onedrive"),
+            "the whole drive is a vault too"
+        );
+        assert_eq!(
+            drive_name("dropbox:/vaults//brain/").as_deref(),
+            Some("dropbox-vaults-brain")
+        );
+        assert_eq!(drive_name("~/notes"), None, "a path is not a drive");
+        assert_eq!(drive_name("/home/me/notes"), None);
+        assert_eq!(drive_name("./notes"), None);
+        assert_eq!(
+            drive_name("2026-09-06 10:30 notes"),
+            None,
+            "a folder named with a time is not a remote"
+        );
+        assert_eq!(
+            drive_name("https://github.com/you/notes"),
+            None,
+            "a URL is git's: the scheme's // is not a folder"
+        );
+    }
+
+    #[test]
     fn a_vault_is_a_directory_that_exists() {
         let home = std::env::var("HOME").unwrap();
         // Asserted through the error, so the test holds where $HOME does not exist.
@@ -357,5 +560,16 @@ mod tests {
                 .contains("not a directory"),
             "a file is not a vault"
         );
+
+        // A directory is asked about before the remote syntax is, so a colon in a folder
+        // name can never send someone's vault to rclone.
+        let odd = std::env::temp_dir().join("brain-map: a vault");
+        std::fs::create_dir_all(&odd).unwrap();
+        assert_eq!(
+            open_vault(odd.to_str().unwrap()).unwrap(),
+            odd.canonicalize().unwrap(),
+            "a real directory wins over remote:path"
+        );
+        let _ = std::fs::remove_dir_all(&odd);
     }
 }
