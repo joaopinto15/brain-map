@@ -13,10 +13,10 @@
         pkgs.wayland
         pkgs.libxkbcommon
         pkgs.libglvnd
-        pkgs.xorg.libX11
-        pkgs.xorg.libXcursor
-        pkgs.xorg.libXrandr
-        pkgs.xorg.libXi
+        pkgs.libx11
+        pkgs.libxcursor
+        pkgs.libxrandr
+        pkgs.libxi
       ];
       # glvnd picks a driver by reading a vendor file, and a Nix binary cannot use the
       # host distribution's. Mesa no longer ships one of its own, so this is it: NixOS's
