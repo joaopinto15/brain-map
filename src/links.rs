@@ -125,7 +125,7 @@ mod tests {
         Links::resolve(vault)
             .edges
             .iter()
-            .map(|(a, b)| (a.wire_id(), b.wire_id()))
+            .map(|(a, b)| (a.node_id(), b.node_id()))
             .collect()
     }
 

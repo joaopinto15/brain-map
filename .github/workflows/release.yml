@@ -1,5 +1,5 @@
-# A tag is the release. Pushing `v0.2.0` builds the binary, runs both suites against it,
-# and publishes the tarball the AUR package downloads — nothing here is run by hand.
+# A tag is the release. Pushing `v0.2.0` builds the binary, runs the tests against it, and
+# publishes the tarball the AUR package downloads — nothing here is run by hand.
 name: release
 
 on:
@@ -13,11 +13,13 @@ jobs:
   release:
     runs-on: ubuntu-latest
     # Built on Arch itself, so the binary links the same library sonames the AUR package
-    # will install. A build on another distribution can disagree about webkit2gtk's ABI.
+    # will install. A build on another distribution can disagree about them.
     container: archlinux:base-devel
     steps:
       - name: Install the toolchain
-        run: pacman -Syu --noconfirm git rust nodejs pkgconf webkit2gtk-4.1
+        run: >
+          pacman -Syu --noconfirm git rust pkgconf
+          libglvnd libxkbcommon wayland libx11 libxcursor libxrandr libxi noto-fonts-emoji
 
       - uses: actions/checkout@v4
 
@@ -27,9 +29,8 @@ jobs:
           crate=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           [ "$tag" = "$crate" ] || { echo "tag $GITHUB_REF_NAME but Cargo.toml says $crate"; exit 1; }
 
-      - run: cargo test --locked
+      - run: cargo test --workspace --locked
       - run: cargo build --release --locked
-      - run: node tests/sim.mjs
 
       - name: Pack the release
         run: |

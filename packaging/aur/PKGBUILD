@@ -12,13 +12,15 @@ pkgdesc="Turns a folder of markdown notes into an interactive knowledge graph"
 arch=('x86_64')
 url="https://github.com/joaopinto15/brain-map"
 license=('MIT')
-# webkit2gtk-4.1 carries gtk3, libsoup3 and javascriptcoregtk with it, so listing those
-# again would only be repeating its own dependencies.
-depends=('webkit2gtk-4.1')
+# The window draws itself, so there is no browser engine here: this is what it opens
+# with — the display protocols, the keyboard map, and GL.
+# noto-fonts-emoji is where the icons come from: the window reads the colour bitmaps
+# out of it directly, so without it every icon is a grey outline.
+depends=('noto-fonts-emoji' 'libglvnd' 'libxkbcommon' 'wayland' 'libx11' 'libxcursor' 'libxrandr' 'libxi')
 optdepends=(
   'zenity: folder dialog for the vault picker'
   'kdialog: folder dialog for the vault picker, on KDE'
-  'xdg-utils: open the graph in a browser when no webview is available'
+  'xdg-utils: open a link in a note in your browser'
 )
 provides=("$_pkgname")
 conflicts=("$_pkgname")

@@ -1,0 +1,26 @@
+[package]
+name = "brain-map-app"
+version = "0.1.0"
+edition = "2021"
+
+# The window. `eframe` brings egui and the platform underneath it — the one dependency
+# on this side, and the only one the page has ever had that it did not write itself.
+# Pinned to a minor: egui reshapes its App trait between them.
+# `ttf-parser` and `png` read the colour bitmaps out of the emoji font, which egui's own
+# glyph rasteriser cannot draw. Both are already underneath eframe, so neither is a new
+# package in the lock — they are named here because this crate calls them directly.
+# egui's own bundled fonts, so the glyph test asks the fonts that will do the drawing
+# rather than trusting that a character looks like it should exist.
+[dev-dependencies]
+epaint_default_fonts = "0.32"
+
+[dependencies]
+brain-map-model = { path = "../model" }
+png = "0.18"
+ttf-parser = "0.25"
+eframe = { version = "0.32", default-features = false, features = [
+  "glow",
+  "default_fonts",
+  "wayland",
+  "x11",
+] }

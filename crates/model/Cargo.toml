@@ -1,0 +1,8 @@
+[package]
+name = "brain-map-model"
+version = "0.1.0"
+edition = "2021"
+
+# The graph both halves share. It carries no dependency at all: it is types and the
+# trait the page asks the scanner through.
+[dependencies]

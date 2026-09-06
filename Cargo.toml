@@ -4,7 +4,14 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
+# The scanner is this crate, the window is `crates/app`, and `crates/model` is the graph
+# they meet on. One workspace, one lock: nothing is built for another target any more.
+[workspace]
+members = ["crates/model", "crates/app"]
+
 [dependencies]
-emojis = "0.9"
-tao = "0.37"
-wry = { version = "0.56", features = ["devtools"] }
+brain-map-app = { path = "crates/app" }
+brain-map-model = { path = "crates/model" }
+
+[profile.release]
+lto = true

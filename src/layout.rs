@@ -12,20 +12,7 @@ const PALETTE: [&str; 12] = [
     "#e879f9", "#facc15", "#94a3b8", "#2dd4bf",
 ];
 
-#[derive(Clone)]
-pub struct Group {
-    pub key: String,
-    pub color: &'static str,
-    pub radius: f64,
-    pub glow: f64,
-    pub name: String,
-    /// Milliseconds between two notes of this group appearing during the growth animation.
-    pub pace: u32,
-    /// Milliseconds of silence before the group starts appearing.
-    pub pause: u32,
-    pub major: bool,
-    pub cluster: bool,
-}
+pub use brain_map_model::Group;
 
 pub struct Layout {
     /// Ordered: position drives both the growth sequence and the legend.
@@ -89,7 +76,7 @@ impl Layout {
             let big = members.len() > 60;
             groups.push(Group {
                 key: key.clone(),
-                color: PALETTE[i % PALETTE.len()],
+                color: PALETTE[i % PALETTE.len()].into(),
                 radius: if big { 3.5 } else { 6.0 },
                 glow: if big { 0.0 } else { 14.0 },
                 name: name.clone(),
@@ -180,7 +167,7 @@ fn group(
 ) -> Group {
     Group {
         key: key.into(),
-        color,
+        color: color.into(),
         radius,
         glow,
         name: name.into(),
@@ -283,10 +270,7 @@ mod tests {
             layout.group_key(&NodeId::Note("metrics/churn.md".into())),
             "metrics"
         );
-        assert_eq!(
-            layout.group_key(&NodeId::Note("scratch.md".into())),
-            "root"
-        );
+        assert_eq!(layout.group_key(&NodeId::Note("scratch.md".into())), "root");
         assert_eq!(layout.mode, "generic folder grouping");
     }
 

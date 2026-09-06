@@ -11,7 +11,7 @@ pub enum NodeId {
 
 impl NodeId {
     /// The id the browser sees. The `__` prefixes live here and nowhere else.
-    pub fn wire_id(&self) -> String {
+    pub fn node_id(&self) -> String {
         match self {
             NodeId::Vault => "__vault__".to_string(),
             NodeId::Folder(top) => format!("__dir__{top}"),
@@ -34,8 +34,8 @@ impl NodeId {
     /// Groups sort by their group first, then by folder, then by id — so a folder
     /// node always lands just above the notes it holds.
     pub fn sort_key(&self) -> (String, String) {
-        let wire = self.wire_id();
-        (parent_of(&wire).to_string(), wire)
+        let graph = self.node_id();
+        (parent_of(&graph).to_string(), graph)
     }
 }
 
@@ -87,10 +87,10 @@ mod tests {
     }
 
     #[test]
-    fn wire_ids_and_labels() {
-        assert_eq!(NodeId::Vault.wire_id(), "__vault__");
-        assert_eq!(NodeId::Folder("ideas".into()).wire_id(), "__dir__ideas");
-        assert_eq!(NodeId::Note("a/b.md".into()).wire_id(), "a/b.md");
+    fn node_ids_and_labels() {
+        assert_eq!(NodeId::Vault.node_id(), "__vault__");
+        assert_eq!(NodeId::Folder("ideas".into()).node_id(), "__dir__ideas");
+        assert_eq!(NodeId::Note("a/b.md".into()).node_id(), "a/b.md");
         assert_eq!(NodeId::Vault.label("MyVault"), "MyVault");
         assert_eq!(NodeId::Folder("ideas".into()).label("MyVault"), "ideas");
         assert_eq!(NodeId::Note("a/README.md".into()).label("MyVault"), "a");

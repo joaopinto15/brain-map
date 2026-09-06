@@ -24,6 +24,8 @@ pub struct Note {
     pub text: String,
     pub title: Option<String>,
     pub tags: Vec<String>,
+    /// The emoji the note declares. Nothing guesses one: this is the only source.
+    pub icon: Option<String>,
 }
 
 impl Note {
@@ -34,6 +36,7 @@ impl Note {
             text,
             title: front.title,
             tags: front.tags,
+            icon: front.icon,
         }
     }
 }
@@ -82,7 +85,7 @@ impl Vault {
     }
 }
 
-/// A note's source, for the reader panel. The path comes off the wire, so it is
+/// A note's source, for the reader panel. The path comes off the graph, so it is
 /// normalized, forced to `.md`, and required to canonicalize to a file inside the
 /// vault — a symlink or a `..` that climbs out gets nothing.
 pub fn note_path(root: &Path, rel: &str) -> Option<PathBuf> {
@@ -105,10 +108,12 @@ pub fn read_note(root: &Path, rel: &str) -> Option<String> {
 struct Front {
     title: Option<String>,
     tags: Vec<String>,
+    icon: Option<String>,
 }
 
 /// The frontmatter fields the graph uses, read out of a leading `---` block. A note's
-/// section is its folder and its subjects are its tags, so no other key is read.
+/// section is its folder, its subjects are its tags, and its icon is whatever it says it
+/// is — so no other key is read.
 // ponytail: flat scalars and the two `tags` list forms; a real YAML parser is a
 // dependency this repo does not take.
 fn frontmatter(text: &str) -> Front {
@@ -145,6 +150,7 @@ fn frontmatter(text: &str) -> Front {
         let value = value.trim();
         match key.trim() {
             "title" if !value.is_empty() => front.title = Some(unquote(value).to_string()),
+            "icon" if !value.is_empty() => front.icon = Some(unquote(value).to_string()),
             "tags" => match value.strip_prefix('[').and_then(|v| v.strip_suffix(']')) {
                 Some(list) => {
                     front.tags = list
@@ -213,7 +219,11 @@ pub fn fingerprint(root: &Path) -> u64 {
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map_or(0, |d| d.as_nanos() as u64);
         let len = meta.map_or(0, |m| m.len());
-        for chunk in [rel.as_bytes(), &modified.to_le_bytes()[..], &len.to_le_bytes()[..]] {
+        for chunk in [
+            rel.as_bytes(),
+            &modified.to_le_bytes()[..],
+            &len.to_le_bytes()[..],
+        ] {
             for byte in chunk {
                 hash ^= *byte as u64;
                 hash = hash.wrapping_mul(FNV_PRIME);
@@ -248,9 +258,7 @@ mod tests {
 
     #[test]
     fn reads_the_title_and_both_tag_forms() {
-        let inline = frontmatter(
-            "---\ntitle: Weekly revenue\ntags: [sales, \"q3\"]\n---\nbody",
-        );
+        let inline = frontmatter("---\ntitle: Weekly revenue\ntags: [sales, \"q3\"]\n---\nbody");
         assert_eq!(inline.title.as_deref(), Some("Weekly revenue"));
         assert_eq!(inline.tags, ["sales", "q3"]);
 
@@ -288,7 +296,11 @@ mod tests {
         fs::write(dir.join("b.md"), "two").unwrap();
 
         let start = fingerprint(&dir);
-        assert_eq!(start, fingerprint(&dir), "an untouched vault keeps its number");
+        assert_eq!(
+            start,
+            fingerprint(&dir),
+            "an untouched vault keeps its number"
+        );
 
         fs::write(dir.join("c.md"), "three").unwrap();
         let added = fingerprint(&dir);
@@ -304,13 +316,21 @@ mod tests {
         assert_ne!(renamed, fingerprint(&dir), "an edit moves it");
 
         fs::remove_file(dir.join("d.md")).unwrap();
-        assert_eq!(start, fingerprint(&dir), "and undoing every change brings it back");
+        assert_eq!(
+            start,
+            fingerprint(&dir),
+            "and undoing every change brings it back"
+        );
 
         // What the scan ignores, the fingerprint ignores, or the page reloads forever.
         fs::create_dir_all(dir.join(".git")).unwrap();
         fs::write(dir.join(".git/HEAD.md"), "noise").unwrap();
         fs::write(dir.join("notes.txt"), "not markdown").unwrap();
-        assert_eq!(start, fingerprint(&dir), "skipped directories and non-markdown do not count");
+        assert_eq!(
+            start,
+            fingerprint(&dir),
+            "skipped directories and non-markdown do not count"
+        );
 
         fs::remove_dir_all(&dir).unwrap();
     }
