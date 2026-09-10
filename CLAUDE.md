@@ -34,7 +34,9 @@ fails on it.
 `main` takes no direct pushes. Every change is a branch and a pull request, and the
 branch says what kind of change it is: `feature/`, `bugfix/` or `hotfix/`, then lower
 case words joined by hyphens. `.github/workflows/branch-name.yml` fails a pull request
-whose branch is named anything else.
+whose branch is named anything else. `cargo test --workspace` and `cargo fmt --all
+--check` run on every pull request as well, and both must pass before it can merge. The
+whole flow, including how a release is cut, is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Shape
 
