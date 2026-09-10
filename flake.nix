@@ -49,6 +49,13 @@
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
             nativeBuildInputs = [ pkgs.pkg-config pkgs.makeWrapper ];
+            # The launcher entry and its icon, the same two files the AUR packages install.
+            postInstall = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+              install -Dm644 packaging/brain-map.desktop \
+                $out/share/applications/brain-map.desktop
+              install -Dm644 packaging/brain-map.svg \
+                $out/share/icons/hicolor/scalable/apps/brain-map.svg
+            '';
             buildInputs = runtime pkgs;
             # Nothing above is linked into the binary, so the wrapper is what makes it
             # findable at all.

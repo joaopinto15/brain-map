@@ -1,5 +1,5 @@
-//! What outlives a run: the theme, the explorer's width, the growth budget and the vaults
-//! you have opened.
+//! What outlives a run: the theme, the explorer's width and whether it is open, the growth
+//! budget and the vaults you have opened — every setting the dialog has.
 //!
 //! One file of `key=value` lines under the desktop's config directory. A key may appear
 //! more than once, which is the whole of the recent list — no format, no parser, and
@@ -10,10 +10,11 @@
 
 use std::path::PathBuf;
 
-const PANEL: &str = "panel";
 const THEME: &str = "theme";
 const GROWTH: &str = "growth";
 const RECENT: &str = "recent";
+const PANEL: &str = "panel";
+const EXPLORER: &str = "explorer";
 /// How many vaults the picker remembers.
 const REMEMBERED: usize = 6;
 
@@ -38,12 +39,18 @@ impl Settings {
         crate::theme::by_key(&self.one(THEME)?)
     }
 
-    pub fn panel_width(&self, fallback: f64) -> f64 {
+    pub fn budget(&self, fallback: u32) -> u32 {
+        self.number(GROWTH, fallback)
+    }
+
+    pub fn panel(&self, fallback: f64) -> f64 {
         self.number(PANEL, fallback)
     }
 
-    pub fn budget(&self, fallback: u32) -> u32 {
-        self.number(GROWTH, fallback)
+    /// Whether the explorer is shown. Anything but `off` is on, since a typo should leave
+    /// the panel where it can be seen.
+    pub fn explorer(&self) -> bool {
+        self.one(EXPLORER).is_none_or(|v| v.trim() != "off")
     }
 
     pub fn recent(&self) -> Vec<String> {
@@ -58,12 +65,18 @@ impl Settings {
         self.put(THEME, &[key.to_string()]);
     }
 
-    pub fn set_panel_width(&mut self, px: f64) {
-        self.put(PANEL, &[px.to_string()]);
-    }
-
     pub fn set_budget(&mut self, ms: u32) {
         self.put(GROWTH, &[ms.to_string()]);
+    }
+
+    /// The explorer as it is left: its width, and whether it is open at all.
+    pub fn set_panel(&mut self, px: f64, hidden: bool) {
+        self.put(PANEL, &[px.round().to_string()]);
+        let shown = match hidden {
+            true => "off",
+            false => "on",
+        };
+        self.put(EXPLORER, &[shown.to_string()]);
     }
 
     /// A vault opened moves to the front of the list, and the list stays short.

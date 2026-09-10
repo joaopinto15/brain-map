@@ -1,6 +1,7 @@
 //! The only module that reads the filesystem. Everything downstream is a pure
 //! function over the `Vault` value it produces.
 
+use crate::okf::Front;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -22,30 +23,20 @@ const SKIP_DIRS: [&str; 11] = [
 pub struct Note {
     pub path: String,
     pub text: String,
-    pub title: Option<String>,
-    pub tags: Vec<String>,
-    /// The emoji the note declares. Nothing guesses one: this is the only source.
-    pub icon: Option<String>,
+    /// What the frontmatter said, typed. Reading it is [`crate::okf::Front::read`]'s job.
+    pub front: Front,
 }
 
 impl Note {
     fn new(path: String, text: String) -> Note {
-        let front = frontmatter(&text);
-        Note {
-            path,
-            text,
-            title: front.title,
-            tags: front.tags,
-            icon: front.icon,
-        }
+        let front = Front::read(&crate::yaml::parse(frontmatter(&text)));
+        Note { path, text, front }
     }
 }
 
 pub struct Vault {
     pub name: String,
     pub root: PathBuf,
-    /// An AI Workshop OS vault: `CLAUDE.md` at the root next to a `wiki/` directory.
-    pub is_aios: bool,
     pub notes: Vec<Note>,
 }
 
@@ -60,7 +51,6 @@ impl Vault {
                 .unwrap_or_else(|_| root.to_path_buf())
                 .file_name()
                 .map_or("Vault".to_string(), |n| n.to_string_lossy().into_owned()),
-            is_aios: root.join("CLAUDE.md").is_file() && root.join("wiki").is_dir(),
             root: root.to_path_buf(),
             notes,
         }
@@ -104,77 +94,24 @@ pub fn read_note(root: &Path, rel: &str) -> Option<String> {
     fs::read_to_string(note_path(root, rel)?).ok()
 }
 
-#[derive(Default)]
-struct Front {
-    title: Option<String>,
-    tags: Vec<String>,
-    icon: Option<String>,
-}
-
-/// The frontmatter fields the graph uses, read out of a leading `---` block. A note's
-/// section is its folder, its subjects are its tags, and its icon is whatever it says it
-/// is — so no other key is read.
-// ponytail: flat scalars and the two `tags` list forms; a real YAML parser is a
-// dependency this repo does not take.
-fn frontmatter(text: &str) -> Front {
-    let mut front = Front::default();
+/// The `---` block at the head of a note, or nothing. Only its position is decided here:
+/// what is in it is YAML, and [`crate::yaml`] reads that.
+fn frontmatter(text: &str) -> &str {
     let Some(rest) = text
         .strip_prefix("---\n")
         .or_else(|| text.strip_prefix("---\r\n"))
     else {
-        return front;
+        return "";
     };
-
-    let mut in_tags = false;
-    for line in rest.lines() {
+    let mut end = 0;
+    for line in rest.split_inclusive('\n') {
         let trimmed = line.trim_end();
         if trimmed == "---" || trimmed == "..." {
-            break;
+            return &rest[..end];
         }
-        if in_tags {
-            if let Some(item) = trimmed.trim_start().strip_prefix("- ") {
-                let tag = unquote(item);
-                if !tag.is_empty() {
-                    front.tags.push(tag.to_string());
-                }
-                continue;
-            }
-            in_tags = false;
-        }
-        if trimmed.starts_with([' ', '\t', '-']) {
-            continue; // nested structure this parser does not read
-        }
-        let Some((key, value)) = trimmed.split_once(':') else {
-            continue;
-        };
-        let value = value.trim();
-        match key.trim() {
-            "title" if !value.is_empty() => front.title = Some(unquote(value).to_string()),
-            "icon" if !value.is_empty() => front.icon = Some(unquote(value).to_string()),
-            "tags" => match value.strip_prefix('[').and_then(|v| v.strip_suffix(']')) {
-                Some(list) => {
-                    front.tags = list
-                        .split(',')
-                        .map(|t| unquote(t).to_string())
-                        .filter(|t| !t.is_empty())
-                        .collect()
-                }
-                None => in_tags = value.is_empty(),
-            },
-            _ => {}
-        }
+        end += line.len();
     }
-    front
-}
-
-fn unquote(s: &str) -> &str {
-    let s = s.trim();
-    for quote in ['"', '\''] {
-        if let Some(inner) = s.strip_prefix(quote).and_then(|v| v.strip_suffix(quote)) {
-            return inner;
-        }
-    }
-    s
+    ""
 }
 
 /// Every note under `dir`, with the skip rules in one place: the scan reads the files,
@@ -240,11 +177,10 @@ fn collect(dir: &Path, root: &Path, out: &mut Vec<Note>) {
 }
 
 #[cfg(test)]
-pub fn fixture(is_aios: bool, notes: &[(&str, &str)]) -> Vault {
+pub fn fixture(notes: &[(&str, &str)]) -> Vault {
     Vault {
         name: "MyVault".into(),
         root: PathBuf::from("/nonexistent-brain-map-fixture"),
-        is_aios,
         notes: notes
             .iter()
             .map(|(path, text)| Note::new((*path).to_string(), (*text).to_string()))
@@ -257,34 +193,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reads_the_title_and_both_tag_forms() {
-        let inline = frontmatter("---\ntitle: Weekly revenue\ntags: [sales, \"q3\"]\n---\nbody");
-        assert_eq!(inline.title.as_deref(), Some("Weekly revenue"));
-        assert_eq!(inline.tags, ["sales", "q3"]);
-
-        let block =
-            frontmatter("---\ntitle: On call\ntags:\n  - ops\n  - oncall\nstatus: draft\n---\n");
-        assert_eq!(block.title.as_deref(), Some("On call"));
-        assert_eq!(block.tags, ["ops", "oncall"]);
+    fn the_block_between_the_markers_is_the_frontmatter_and_nothing_else_is() {
+        assert_eq!(
+            frontmatter("---\ntitle: Weekly revenue\ntags: [sales]\n---\nbody"),
+            "title: Weekly revenue\ntags: [sales]\n"
+        );
+        assert_eq!(
+            frontmatter("---\r\ntitle: A\r\n...\r\nbody"),
+            "title: A\r\n"
+        );
+        assert_eq!(
+            frontmatter("# Note\n\n---\ntitle: Revenue\n---\n"),
+            "",
+            "a rule further down is a rule, not frontmatter"
+        );
+        assert_eq!(
+            frontmatter("---\ntitle: never closed\n"),
+            "",
+            "an open block is none"
+        );
+        assert_eq!(frontmatter("no frontmatter"), "");
     }
 
-    /// A vault may well declare one — an OKF bundle does on every concept — but a note's
-    /// section is its folder and its subjects are its tags, so `type` is read past.
     #[test]
-    fn a_type_is_ignored_rather_than_grouped_on() {
-        let front = frontmatter("---\ntype: Metric\ntitle: Revenue\ntags: [sales]\n---\n");
-        assert_eq!(front.title.as_deref(), Some("Revenue"));
-        assert_eq!(front.tags, ["sales"]);
-    }
-
-    #[test]
-    fn nested_values_and_a_late_marker_are_not_frontmatter() {
-        let nested = frontmatter("---\ntitle: Orders\ngenerated:\n  by: human:pinto\n---\n");
-        assert_eq!(nested.title.as_deref(), Some("Orders"));
-        assert!(nested.tags.is_empty());
-
-        let late = frontmatter("# Note\n\n---\ntitle: Revenue\ntags: [sales]\n---\n");
-        assert!(late.title.is_none() && late.tags.is_empty());
+    fn a_note_carries_what_it_declared() {
+        let vault = fixture(&[(
+            "m/rev.md",
+            "---\ntype: Metric\ntitle: Revenue\nicon: \u{1f4ca}\ntags:\n  - sales\n  - q3\nstatus: draft\n---\n# Body\n",
+        )]);
+        let rev = &vault.note("m/rev.md").unwrap().front;
+        assert_eq!(rev.concept.as_deref(), Some("Metric"));
+        assert_eq!(rev.title.as_deref(), Some("Revenue"));
+        assert_eq!(rev.icon.as_deref(), Some("\u{1f4ca}"));
+        assert_eq!(rev.tags, ["sales", "q3"]);
+        assert_eq!(rev.status.as_deref(), Some("draft"));
     }
 
     #[test]
@@ -356,6 +298,6 @@ mod tests {
     #[test]
     fn a_plain_note_carries_no_frontmatter() {
         let note = Note::new("a.md".into(), "just text".into());
-        assert!(note.title.is_none() && note.tags.is_empty());
+        assert_eq!(note.front, Front::default());
     }
 }

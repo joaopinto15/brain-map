@@ -37,6 +37,7 @@ pub struct Node {
     pub label: String,
     pub group: String,
     pub tags: Vec<String>,
+    pub signals: Vec<String>,
     /// The emoji the note declared, or empty. Nothing here derives one.
     pub icon: String,
     pub x: f64,
@@ -70,12 +71,12 @@ pub struct View {
     pub k: f64,
 }
 
-/// The window the graph is drawn into, and how much of it the explorer covers.
+/// The window the graph is drawn into. The explorer floats over it, so the graph is
+/// centred on the whole window whether it is open or not.
 #[derive(Clone, Copy, Debug)]
 pub struct Viewport {
     pub w: f64,
     pub h: f64,
-    pub panel: f64,
 }
 
 pub struct Sim {
@@ -119,6 +120,7 @@ impl Sim {
                     label: n.label.clone(),
                     group: n.group.clone(),
                     tags: n.tags.clone(),
+                    signals: n.signals.clone(),
                     icon: n.icon.clone(),
                     x: 0.0,
                     y: 0.0,
@@ -180,7 +182,6 @@ impl Sim {
             viewport: Viewport {
                 w: 1280.0,
                 h: 800.0,
-                panel: 0.0,
             },
             seed: seed | 1,
         };
@@ -399,7 +400,7 @@ impl Sim {
     }
 
     /// The camera eases towards a frame that holds the whole graph, until the user takes
-    /// over. The explorer never goes away, so the centre is the middle of what is left.
+    /// over. The centre is the middle of the window, explorer open or not.
     pub fn camera_step(&mut self) {
         if self.active.is_empty() || self.user_cam {
             return;
@@ -412,7 +413,7 @@ impl Sim {
             y1 = y1.max(self.nodes[i].y);
         }
         let fit = 2.0f64
-            .min((self.viewport.w - self.viewport.panel) / (x1 - x0 + 220.0))
+            .min(self.viewport.w / (x1 - x0 + 220.0))
             .min(self.viewport.h / (y1 - y0 + 220.0));
         self.view.k += (fit - self.view.k) * 0.05;
         self.view.x += ((x0 + x1) / 2.0 - self.view.x) * 0.07;
@@ -421,7 +422,7 @@ impl Sim {
 
     pub fn to_world(&self, sx: f64, sy: f64) -> (f64, f64) {
         (
-            (sx - (self.viewport.w + self.viewport.panel) / 2.0) / self.view.k + self.view.x,
+            (sx - self.viewport.w / 2.0) / self.view.k + self.view.x,
             (sy - self.viewport.h / 2.0) / self.view.k + self.view.y,
         )
     }
@@ -450,7 +451,10 @@ impl Sim {
             .filter(|&i| self.nodes[i].label.to_lowercase().contains(&needle))
             .collect();
         let by_path = self.active.iter().copied().filter(|&i| {
-            !by_label.contains(&i) && self.nodes[i].id.to_lowercase().contains(&needle)
+            let node = &self.nodes[i];
+            !by_label.contains(&i)
+                && (node.id.to_lowercase().contains(&needle)
+                    || node.tags.iter().any(|t| t.to_lowercase().contains(&needle)))
         });
         by_label.iter().copied().chain(by_path).collect()
     }
@@ -485,7 +489,7 @@ mod tests {
                     glow: 30.0,
                     pace: 0,
                     pause: 0,
-                    ..group("router", 0)
+                    ..group("__structure", 0)
                 },
                 group("ideas", 200),
                 group("daily", 200),
@@ -495,9 +499,11 @@ mod tests {
         graph.nodes.push(GraphNode {
             id: "__vault__".into(),
             label: "vault".into(),
-            group: "router".into(),
+            group: "__structure".into(),
             tags: vec![],
+            signals: vec![],
             icon: String::new(),
+            concept: Default::default(),
         });
         for g in ["ideas", "daily"] {
             graph.nodes.push(GraphNode {
@@ -505,7 +511,9 @@ mod tests {
                 label: g.into(),
                 group: g.into(),
                 tags: vec![],
+                signals: vec![],
                 icon: String::new(),
+                concept: Default::default(),
             });
             let dir = graph.nodes.len() - 1;
             graph.links.push(GraphLink { s: 0, t: dir });
@@ -518,7 +526,9 @@ mod tests {
                         0 => vec!["research".into(), format!("tag-{}", i % 3)],
                         _ => vec![],
                     },
+                    signals: vec![],
                     icon: String::new(),
+                    concept: Default::default(),
                 });
                 let n = graph.nodes.len() - 1;
                 graph.links.push(GraphLink { s: dir, t: n });
@@ -623,16 +633,15 @@ mod tests {
     }
 
     #[test]
-    fn the_camera_centres_on_the_window_left_of_the_explorer() {
+    fn the_camera_centres_on_the_whole_window() {
         let graph = vault(20);
         let mut sim = measured(&graph);
         sim.viewport = Viewport {
             w: 1600.0,
             h: 900.0,
-            panel: 420.0,
         };
         settle(&mut sim);
-        let (cx, cy) = sim.to_world((1600.0 + 420.0) / 2.0, 900.0 / 2.0);
+        let (cx, cy) = sim.to_world(1600.0 / 2.0, 900.0 / 2.0);
         assert!(
             (cx - sim.view.x).abs() < 1e-9,
             "{cx} is not the view centre"
@@ -650,7 +659,6 @@ mod tests {
         sim.viewport = Viewport {
             w: 1600.0,
             h: 900.0,
-            panel: 420.0,
         };
         settle(&mut sim);
         // `render` draws a name when the node is bigger than 8 screen pixels.
@@ -702,7 +710,7 @@ mod tests {
         settle(&mut sim);
         let target = sim.active[3];
         let (nx, ny) = (sim.nodes[target].x, sim.nodes[target].y);
-        let sx = (nx - sim.view.x) * sim.view.k + (sim.viewport.w + sim.viewport.panel) / 2.0;
+        let sx = (nx - sim.view.x) * sim.view.k + sim.viewport.w / 2.0;
         let sy = (ny - sim.view.y) * sim.view.k + sim.viewport.h / 2.0;
         assert_eq!(sim.hit(sx, sy), Some(target));
         assert_eq!(sim.hit(sx + 5000.0, sy), None, "empty space hits nothing");

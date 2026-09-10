@@ -31,9 +31,13 @@ impl NodeId {
         matches!(self, NodeId::Note(_))
     }
 
-    /// Groups sort by their group first, then by folder, then by id — so a folder
-    /// node always lands just above the notes it holds.
+    /// Nodes sort by their group first, then by folder, then by id — so a folder node
+    /// always lands just above the notes it holds, and the vault leads the structure it
+    /// shares a group with.
     pub fn sort_key(&self) -> (String, String) {
+        if matches!(self, NodeId::Vault) {
+            return (String::new(), String::new());
+        }
         let graph = self.node_id();
         (parent_of(&graph).to_string(), graph)
     }

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=brain-map
+GenericName=Knowledge graph
+Comment=Turns a folder of markdown notes into an interactive knowledge graph
+Exec=brain-map %f
+Icon=brain-map
+Terminal=false
+Categories=Office;Viewer;
+Keywords=notes;markdown;graph;knowledge;vault;obsidian;
+MimeType=inode/directory;
+StartupWMClass=brain-map

@@ -1,6 +1,8 @@
-//! The legend and what clicking it does. A group holds every note in it, a tag only the
-//! notes that declare it — and the lit set the filter produces is the same one the
-//! click/hover focus uses, so there is only ever one way to dim the graph.
+//! The legend and what clicking it does. The three axes an OKF bundle is cut along: a
+//! type holds every concept of it, a signal the concepts whose trust or lifecycle says
+//! so, and a tag only the concepts that declare it — and the lit set the filter produces
+//! is the same one the click/hover focus uses, so there is only ever one way to dim the
+//! graph.
 //!
 //! The picker's search of the remembered vaults is here too: it narrows a list by what
 //! was typed, which is the same job, and it is tested the same way — without a window.
@@ -10,16 +12,29 @@ use crate::sim::Node;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Filter {
     Group(String),
+    Signal(String),
     Tag(String),
 }
 
 impl Filter {
     pub fn key(&self) -> &str {
         match self {
-            Filter::Group(key) | Filter::Tag(key) => key,
+            Filter::Group(key) | Filter::Signal(key) | Filter::Tag(key) => key,
         }
     }
 }
+
+/// The signals the legend lists, in the order it lists them: trust tier first, since
+/// every concept has one, then the lifecycle a concept only carries when it left the
+/// default. A signal no concept declares gets no row.
+const SIGNALS: [&str; 6] = [
+    "human-reviewed",
+    "machine-confirmed",
+    "unverified",
+    "draft",
+    "deprecated",
+    "stale",
+];
 
 /// A bare word is a search of the vaults you have opened; anything carrying a separator
 /// is a location to open, so typing a path is never hijacked by a vault whose name
@@ -43,6 +58,7 @@ pub fn matches(node: &Node, filter: Option<&Filter>) -> bool {
     match filter {
         None => true,
         Some(Filter::Group(key)) => node.group == *key,
+        Some(Filter::Signal(signal)) => node.signals.iter().any(|s| s == signal),
         Some(Filter::Tag(tag)) => node.tags.iter().any(|t| t == tag),
     }
 }
@@ -64,17 +80,28 @@ pub fn group_counts(nodes: &[Node], keys: &[String]) -> Vec<usize> {
 
 /// The busiest tags, most used first. The legend shows this many and no more.
 pub fn top_tags(nodes: &[Node], limit: usize) -> Vec<(String, usize)> {
-    let mut counts: Vec<(String, usize)> = Vec::new();
-    for node in nodes {
-        for tag in &node.tags {
-            match counts.iter_mut().find(|(t, _)| t == tag) {
-                Some((_, n)) => *n += 1,
-                None => counts.push((tag.clone(), 1)),
-            }
-        }
-    }
+    let mut counts = tally(nodes, |node| &node.tags);
     counts.sort_by(|a, b| b.1.cmp(&a.1));
     counts.truncate(limit);
+    counts
+}
+
+/// How many concepts carry each trust and lifecycle signal, in [`SIGNALS`] order rather
+/// than by count: the tiers read as a scale, so they are worth more standing still.
+pub fn signal_counts(nodes: &[Node]) -> Vec<(String, usize)> {
+    let mut counts = tally(nodes, |node| &node.signals);
+    counts.sort_by_key(|(signal, _)| SIGNALS.iter().position(|s| s == signal).unwrap_or(99));
+    counts
+}
+
+fn tally(nodes: &[Node], of: impl Fn(&Node) -> &Vec<String>) -> Vec<(String, usize)> {
+    let mut counts: Vec<(String, usize)> = Vec::new();
+    for value in nodes.iter().flat_map(of) {
+        match counts.iter_mut().find(|(v, _)| v == value) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((value.clone(), 1)),
+        }
+    }
     counts
 }
 
@@ -148,25 +175,37 @@ mod tests {
             key: "daily".into(),
             ..graph.groups[0].clone()
         });
-        for (id, group, tags) in [
-            ("ideas/a.md", "ideas", vec!["research", "shared"]),
-            ("ideas/b.md", "ideas", vec!["research"]),
-            ("daily/c.md", "daily", vec!["shared"]),
-            ("daily/d.md", "daily", vec![]),
+        for (id, group, tags, signals) in [
+            (
+                "ideas/a.md",
+                "ideas",
+                vec!["research", "shared"],
+                vec!["human-reviewed"],
+            ),
+            (
+                "ideas/b.md",
+                "ideas",
+                vec!["research"],
+                vec!["unverified", "draft"],
+            ),
+            ("daily/c.md", "daily", vec!["shared"], vec!["unverified"]),
+            ("daily/d.md", "daily", vec![], vec!["unverified", "stale"]),
         ] {
             graph.nodes.push(GraphNode {
                 id: id.into(),
                 label: id.into(),
                 group: group.into(),
                 tags: tags.into_iter().map(String::from).collect(),
+                signals: signals.into_iter().map(String::from).collect(),
                 icon: String::new(),
+                concept: Default::default(),
             });
         }
         crate::sim::Sim::new(&graph, |_| 30.0, 1).nodes
     }
 
     #[test]
-    fn a_group_lights_its_notes_and_a_tag_cuts_across_them() {
+    fn each_axis_lights_what_it_names() {
         let nodes = nodes();
         let lit = |f: Option<&Filter>| nodes.iter().filter(|n| matches(n, f)).count();
         assert_eq!(lit(Some(&Filter::Group("ideas".into()))), 2);
@@ -174,8 +213,14 @@ mod tests {
         assert_eq!(
             lit(Some(&Filter::Tag("shared".into()))),
             2,
-            "tags cross folders"
+            "tags cross types"
         );
+        assert_eq!(
+            lit(Some(&Filter::Signal("unverified".into()))),
+            3,
+            "and so do signals"
+        );
+        assert_eq!(lit(Some(&Filter::Signal("stale".into()))), 1);
         assert_eq!(lit(None), 4, "no filter lights everything");
     }
 
@@ -206,6 +251,16 @@ mod tests {
             top_tags(&nodes, 1).len(),
             1,
             "the legend stops at its limit"
+        );
+        assert_eq!(
+            signal_counts(&nodes),
+            [
+                ("human-reviewed".to_string(), 1),
+                ("unverified".to_string(), 3),
+                ("draft".to_string(), 1),
+                ("stale".to_string(), 1),
+            ],
+            "tier order, not count order, and no row for a signal nothing carries"
         );
     }
 

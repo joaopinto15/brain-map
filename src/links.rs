@@ -131,13 +131,10 @@ mod tests {
 
     #[test]
     fn resolves_by_name_and_by_path() {
-        let vault = fixture(
-            false,
-            &[
-                ("Index.md", "[[Graphs]] and [[ideas/Graphs]]"),
-                ("ideas/Graphs.md", ""),
-            ],
-        );
+        let vault = fixture(&[
+            ("Index.md", "[[Graphs]] and [[ideas/Graphs]]"),
+            ("ideas/Graphs.md", ""),
+        ]);
         assert_eq!(
             edges(&vault),
             [
@@ -149,10 +146,7 @@ mod tests {
 
     #[test]
     fn resolves_relative_markdown_links() {
-        let vault = fixture(
-            false,
-            &[("ideas/Graphs.md", "[rust](../Rust.md)"), ("Rust.md", "")],
-        );
+        let vault = fixture(&[("ideas/Graphs.md", "[rust](../Rust.md)"), ("Rust.md", "")]);
         assert_eq!(
             edges(&vault),
             [("ideas/Graphs.md".to_string(), "Rust.md".to_string())]
@@ -161,13 +155,10 @@ mod tests {
 
     #[test]
     fn resolves_bundle_absolute_markdown_links() {
-        let vault = fixture(
-            false,
-            &[
-                ("metrics/revenue.md", "[orders](/tables/orders.md)"),
-                ("tables/orders.md", ""),
-            ],
-        );
+        let vault = fixture(&[
+            ("metrics/revenue.md", "[orders](/tables/orders.md)"),
+            ("tables/orders.md", ""),
+        ]);
         assert_eq!(
             edges(&vault),
             [(
@@ -179,23 +170,17 @@ mod tests {
 
     #[test]
     fn drops_self_links_and_unknown_targets() {
-        let vault = fixture(
-            false,
-            &[(
-                "A.md",
-                "[[A]] [[Nowhere]] [gone](missing.md) [web](https://x.com)",
-            )],
-        );
+        let vault = fixture(&[(
+            "A.md",
+            "[[A]] [[Nowhere]] [gone](missing.md) [web](https://x.com)",
+        )]);
         assert!(edges(&vault).is_empty());
         assert!(Links::resolve(&vault).external.is_empty());
     }
 
     #[test]
     fn alias_and_anchor_target_the_same_note() {
-        let vault = fixture(
-            false,
-            &[("A.md", "[[B|call it what you like]]"), ("B.md", "")],
-        );
+        let vault = fixture(&[("A.md", "[[B|call it what you like]]"), ("B.md", "")]);
         assert_eq!(edges(&vault), [("A.md".to_string(), "B.md".to_string())]);
     }
 }

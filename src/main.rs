@@ -8,7 +8,9 @@ mod graph;
 mod layout;
 mod links;
 mod node;
+mod okf;
 mod vault;
+mod yaml;
 
 use brain_map_model::{Graph, Source};
 use std::path::{Path, PathBuf};
@@ -21,10 +23,10 @@ impl Source for Disk {
     fn scan(&self, vault: &Path) -> Graph {
         let graph = graph::build(vault);
         println!(
-            "brain-map: {} nodes · {} links · {}",
+            "brain-map: {} nodes · {} links · {} groups",
             graph.nodes.len(),
             graph.links.len(),
-            graph.mode
+            graph.groups.len()
         );
         graph.into_graph()
     }
@@ -74,7 +76,7 @@ fn main() {
         Some(dir) => println!("brain-map: opening {}", dir.display()),
         None => println!("brain-map: pick a vault in the window"),
     }
-    if let Err(why) = brain_map_app::run(Box::new(Disk), vault) {
+    if let Err(why) = brain_map_app::run(std::sync::Arc::new(Disk), vault) {
         eprintln!("brain-map: {why}");
         std::process::exit(1);
     }

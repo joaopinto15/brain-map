@@ -20,13 +20,20 @@ const GRIP: f32 = 6.0;
 const HEADER_PAD: f32 = 8.0;
 
 #[derive(Default)]
-pub struct Explorer;
+pub struct Explorer {
+    /// Where the open note is scrolled to. The panel owns it because only the panel needs
+    /// it, and a key that scrolls the reader has to know where it is scrolling from.
+    note_scroll: f32,
+}
 
 /// What the panel was asked to do, gathered while it draws and acted on after — the panel
 /// borrows the session to render, so it cannot also change it mid-frame.
 #[derive(Default)]
 struct Asked {
     go_to: Option<usize>,
+    /// The folder a click asked to open or shut, and the row it put the cursor on.
+    folded: Option<String>,
+    pointed: Option<tree::Key>,
     followed: Option<Target>,
     close: bool,
     edit: bool,
@@ -44,6 +51,9 @@ impl Explorer {
             false => session.engine.ui().panel_width() as f32,
         };
         let mut asked = Asked::default();
+        // Taken before the tree draws: the row the keyboard moved to scrolls itself into
+        // view on that one frame and leaves the scrollbar alone afterwards.
+        let chase = session.engine.ui_mut().take_chase();
         egui::SidePanel::left("explorer")
             .frame(floating(theme).inner_margin(egui::Margin::same(10)))
             .resizable(false)
@@ -53,16 +63,18 @@ impl Explorer {
                 match session.engine.ui().reading() {
                     None => {
                         egui::ScrollArea::vertical().show(ui, |ui| {
-                            asked.go_to = tree_of(
+                            tree_of(
                                 ui,
                                 &session.engine,
                                 &mut session.icons,
                                 session.engine.tree(),
                                 "",
+                                chase,
+                                &mut asked,
                             );
                         });
                     }
-                    Some(at) => note(ui, session, at, &mut asked),
+                    Some(at) => note(ui, session, at, &mut asked, &mut self.note_scroll),
                 }
             });
         self.grip(ctx, session);
@@ -75,6 +87,12 @@ impl Explorer {
         }
         if asked.edit {
             session.edit_open_note();
+        }
+        if let Some(key) = asked.pointed {
+            session.engine.ui_mut().point_at(key);
+        }
+        if let Some(path) = asked.folded {
+            session.engine.ui_mut().toggle_dir(&path);
         }
         if let Some(node) = asked.go_to {
             session.engine.go_to(node);
@@ -104,18 +122,22 @@ impl Explorer {
                 session.engine.set_panel(pointer.x as f64);
             }
         }
+        // Written when the grip is let go, not while it moves: a drag changes the width
+        // every frame and the settings file is rewritten whole.
         if dragged.drag_stopped() {
-            session.engine.ui_mut().save_panel_width();
+            session.engine.remember_panel();
         }
     }
 }
 
-fn note(ui: &mut egui::Ui, session: &mut Session, at: usize, asked: &mut Asked) {
+fn note(ui: &mut egui::Ui, session: &mut Session, at: usize, asked: &mut Asked, scroll: &mut f32) {
     let theme = session.engine.ui().theme();
     let node = session.engine.node(at);
     let (label, id) = (node.label.clone(), node.id.clone());
+    let (concept, signals) = (node.group.clone(), node.signals.clone());
+    // The buttons take their width first and the title elides into what is left: a
+    // heading laid out before them wraps to the whole panel and pushes them off its edge.
     ui.horizontal(|ui| {
-        ui.heading(RichText::new(&label).color(color(theme.heading)));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             asked.close = ui
                 .button(glyph::CLOSE)
@@ -129,9 +151,32 @@ fn note(ui: &mut egui::Ui, session: &mut Session, at: usize, asked: &mut Asked) 
                 .button(glyph::FULLSCREEN)
                 .on_hover_text("Fullscreen (F)")
                 .clicked();
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(
+                    egui::Label::new(RichText::new(&label).heading().color(color(theme.heading)))
+                        .truncate(),
+                )
+                .on_hover_text(&label);
+            });
         });
     });
     ui.label(RichText::new(&id).size(10.5).color(color(theme.muted)));
+    // What the concept declared about itself: its type, then the trust tier and the
+    // lifecycle the legend filters on. Nothing here is derived from the body.
+    ui.horizontal_wrapped(|ui| {
+        let graph = session.engine.graph();
+        if let Some(group) = graph.group(&concept) {
+            ui.label(
+                RichText::new(&group.name)
+                    .size(11.0)
+                    .color(theme.group_colour(&graph.groups, &concept)),
+            );
+        }
+        for signal in &signals {
+            ui.add_space(8.0);
+            ui.label(RichText::new(signal).size(11.0).color(color(theme.muted)));
+        }
+    });
     let tags = session.engine.node(at).tags.clone();
     if !tags.is_empty() {
         ui.horizontal_wrapped(|ui| {
@@ -141,10 +186,26 @@ fn note(ui: &mut egui::Ui, session: &mut Session, at: usize, asked: &mut Asked) 
             }
         });
     }
+    let about = session.engine.concept(at).clone();
+    if !about.description.is_empty() {
+        ui.add_space(4.0);
+        ui.label(RichText::new(&about.description).italics());
+    }
+    if !about.resource.is_empty() && ui.link(RichText::new(&about.resource).size(11.0)).clicked() {
+        asked.followed = Some(Target::Url(about.resource.clone()));
+    }
     ui.separator();
-    egui::ScrollArea::vertical()
-        .id_salt("note")
-        .show(ui, |ui| match session.note() {
+    // What `j` and `k` asked for while the note was open. The offset is set rather than
+    // nudged: `Ui::scroll_with_delta` leaves it in the pass state, where the first scroll
+    // area to finish takes it — and inside a note that is a table or a code block, which
+    // only scroll sideways.
+    let scrolled = session.engine.ui_mut().take_scroll();
+    let mut area = egui::ScrollArea::vertical().id_salt("note");
+    if scrolled != 0.0 {
+        area = area.vertical_scroll_offset((*scroll - scrolled).max(0.0));
+    }
+    let shown = area.show(ui, |ui| {
+        match session.note() {
             Some(blocks) if !blocks.is_empty() => {
                 asked.followed = Reader::new(theme).show(ui, blocks);
             }
@@ -154,46 +215,152 @@ fn note(ui: &mut egui::Ui, session: &mut Session, at: usize, asked: &mut Asked) 
             None => {
                 ui.label(RichText::new("Loading…").color(color(theme.muted)));
             }
-        });
+        }
+        provenance(ui, session, at, &id, &about, asked);
+    });
+    *scroll = shown.state.offset.y;
 }
 
-/// The vault as a folder tree. A collapsing header carries the open and closed state, so
-/// there is none to track here.
+/// Where the concept came from and who stands behind it, under the body the way the OKF
+/// viewer lists them: who generated and verified it, the sources it derives from, and the
+/// concepts that cite it. A source that names a note in this vault opens it; a URL opens
+/// outside; a scope descriptor is just words.
+fn provenance(
+    ui: &mut egui::Ui,
+    session: &Session,
+    at: usize,
+    id: &str,
+    about: &brain_map_model::Concept,
+    asked: &mut Asked,
+) {
+    let theme = session.engine.ui().theme();
+    let muted = |text: &str| RichText::new(text).size(11.0).color(color(theme.muted));
+    let heading = |ui: &mut egui::Ui, text: &str| {
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new(text)
+                .size(11.0)
+                .strong()
+                .color(color(theme.muted)),
+        );
+    };
+    let actor = |event: &brain_map_model::Actor| match (event.by.is_empty(), event.at.is_empty()) {
+        (false, false) => format!("{} · {}", event.by, event.at),
+        (false, true) => event.by.clone(),
+        (true, _) => event.at.clone(),
+    };
+
+    if about.generated.is_some() || !about.verified.is_empty() {
+        heading(ui, "Trust");
+        if let Some(generated) = &about.generated {
+            ui.label(muted(&format!("generated {}", actor(generated))));
+        }
+        for event in &about.verified {
+            ui.label(muted(&format!("verified {}", actor(event))));
+        }
+    }
+
+    if !about.sources.is_empty() {
+        heading(ui, "Sources");
+        for source in &about.sources {
+            let label = [&source.title, &source.resource, &source.id]
+                .into_iter()
+                .find(|s| !s.is_empty())
+                .cloned()
+                .unwrap_or_else(|| "source".to_string());
+            let resource = source.resource.as_str();
+            let note = session
+                .engine
+                .resolve(resource, Some(id), true)
+                .or_else(|| session.engine.resolve(resource, None, false));
+            let is_url = resource.starts_with("http://") || resource.starts_with("https://");
+            match (note, is_url) {
+                (Some(node), _) => {
+                    if ui.link(RichText::new(&label).size(11.0)).clicked() {
+                        asked.go_to = Some(node);
+                    }
+                }
+                (None, true) => {
+                    if ui.link(RichText::new(&label).size(11.0)).clicked() {
+                        asked.followed = Some(Target::Url(resource.to_string()));
+                    }
+                }
+                (None, false) => {
+                    ui.label(muted(&label));
+                }
+            }
+        }
+    }
+
+    let cited_by = session.engine.cited_by(at);
+    if !cited_by.is_empty() {
+        heading(ui, "Cited by");
+        for from in cited_by {
+            let name = session.engine.node(from).label.clone();
+            if ui.link(RichText::new(name).size(11.0)).clicked() {
+                asked.go_to = Some(from);
+            }
+        }
+    }
+}
+
+/// The vault as a folder tree. Which folders are open lives in `Ui` rather than in the
+/// header's own memory, because the keyboard opens and shuts them too — `Engine::rows`
+/// flattens the same answer into the list `j` and `k` walk.
 fn tree_of(
     ui: &mut egui::Ui,
     engine: &Engine,
     icons: &mut Icons,
     dir: &tree::Dir,
     path: &str,
-) -> Option<usize> {
-    let mut chosen = None;
+    chase: bool,
+    asked: &mut Asked,
+) {
+    let cursor = engine.ui().cursor();
+    let theme = engine.ui().theme();
     for (name, below) in &dir.dirs {
         let here = format!("{path}/{name}");
+        let on = cursor == Some(&tree::Key::Dir(here.clone()));
         // A collapsing header lays its title out with `TextWrapMode::Extend` and offers
         // no way to say otherwise, so the name is cut to fit before it is handed over.
         let room = ui.available_width() - ui.spacing().indent - HEADER_PAD;
-        let title = elide(name, room, |text| width_of(ui, text));
+        let mut title = RichText::new(elide(name, room, |text| width_of(ui, text)));
+        if on {
+            title = title.color(color(theme.accent));
+        }
         // The header's own arrow says it is a folder, so it needs no icon of its own.
         let open = egui::CollapsingHeader::new(title)
             .id_salt(&here)
-            .default_open(true)
-            .show(ui, |ui| tree_of(ui, engine, icons, below, &here));
-        open.header_response.on_hover_text(name);
-        chosen = open.body_returned.flatten().or(chosen);
+            .open(Some(engine.ui().dir_open(&here)))
+            .show(ui, |ui| {
+                tree_of(ui, engine, icons, below, &here, chase, asked)
+            });
+        let header = open.header_response.on_hover_text(name);
+        if on && chase {
+            header.scroll_to_me(Some(egui::Align::Center));
+        }
+        if header.clicked() {
+            asked.folded = Some(here.clone());
+            asked.pointed = Some(tree::Key::Dir(here));
+        }
     }
     for &node in &dir.files {
-        let on = engine.ui().reading() == Some(node);
+        let on = engine.ui().reading() == Some(node) || cursor == Some(&tree::Key::File(node));
         ui.horizontal(|ui| {
             icon(ui, icons, engine.icon_of(node), 13.0);
             // A name too long for the panel ends in an ellipsis rather than being cut off
             // mid-letter, and the whole of it is the tooltip.
             let row = ui.add(egui::Button::selectable(on, &engine.node(node).label).truncate());
-            if row.on_hover_text(engine.node_id(node)).clicked() {
-                chosen = Some(node);
+            let row = row.on_hover_text(engine.node_id(node));
+            if on && chase {
+                row.scroll_to_me(Some(egui::Align::Center));
+            }
+            if row.clicked() {
+                asked.pointed = Some(tree::Key::File(node));
+                asked.go_to = Some(node);
             }
         });
     }
-    chosen
 }
 
 /// How wide a title is drawn, asked of the fonts that will draw it.

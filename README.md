@@ -65,9 +65,13 @@ brain-map is one window and one process. There is no browser, no server and no p
 reads the vault off the disk and draws it, so the notes never leave the machine and
 nothing is listening while it does.
 
-It works on an Obsidian vault, an AI Workshop OS vault, or a plain folder of `.md`
-files. Edges come from `[[wikilinks]]` and relative markdown links. A vault with no
-links still draws as a tree: vault → folder → note.
+It reads a vault as an
+[Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
+bundle, and works on any folder of `.md` files — an OKF bundle, an Obsidian vault, a pile
+of notes — because OKF asks a consumer to take a concept as it finds it. Edges come from
+`[[wikilinks]]` and markdown links, relative or bundle-absolute
+(`[orders](/tables/orders.md)`). A vault with no links still draws as a tree: vault →
+folder → note.
 
 ## Keys
 
@@ -77,32 +81,54 @@ the search box and **n** and **N** walk the matches. **R** replays the growth an
 whatever is held. Everything configurable lives behind **⚙ Settings**: vault, theme,
 growth budget, explorer width, and whether the explorer shows.
 
-## Groups and tags
+## Types, signals and tags
 
-A note has exactly one *group*: its top-level folder, or its role in an AI Workshop OS
-vault. The group decides the note's colour, its size and when it appears in the growth
-animation, so the groups partition the vault and their counts add up to it. *Tags* come
-from the `tags:` field in the frontmatter. A note can carry several or none, they cut
-across folders. Filtering by a group shows one region of
-the map. Filtering by a tag shows a thread running through several.
+The legend cuts the graph three ways, and a row of it is a filter that dims everything
+else.
 
-`title`, `tags` and `icon` are the only frontmatter keys read. `icon:` is one emoji and
-it is the only thing that puts one on a note — nothing is inferred from a note's name, its
-folder or its tags, so a note without the key draws as a plain disc.
+A concept has exactly one *type*: the `type:` it declares, `Untyped` if it declares none.
+The type decides the concept's colour, its size and when it appears in the growth
+animation, so the types partition the vault and their counts add up to it. Folders are
+structure, not type — a bundle organizes its concepts into directories however it likes,
+and the tree is drawn but never grouped on. The reserved `index.md` and `log.md` are not
+concepts, so they group as *Index & log*.
+
+*Signals* are what the frontmatter says about trusting a concept: its trust tier —
+`human-reviewed` when a `human:` actor verified it, `machine-confirmed` when something
+else did, `unverified` when nothing has — plus `draft` or `deprecated` when `status:`
+left the default, and `stale` once `stale_after:` has passed. Every one of them is read,
+never inferred.
+
+*Tags* come from the `tags:` field. A concept can carry several or none, and they cut
+across types. Filtering by a type shows one region of the map, by a signal what to trust
+in it, by a tag a thread running through several.
+
+`icon:` is one emoji and it is the only thing that puts one on a note — nothing is
+inferred from a note's name, its folder or its tags, so a note without the key draws as a
+plain disc.
 
 ```yaml
 ---
-title: Sistemas Gráficos Interativos
-icon: 🎨
-tags: [meic, feup, graphics]
+type: Metric
+title: Gross margin
+icon: 📊
+tags: [finance, margin]
+status: stable
+verified: { by: human:jp, at: 2026-06-25T09:00:00Z }
+stale_after: 2026-12-31T00:00:00Z
 ---
 ```
 
- A `type:` is read past, so the
-concepts of an
-[Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
-bundle group by the directory they sit in like any other note, and bundle-absolute links
-(`[orders](/tables/orders.md)`) resolve alongside relative ones.
+Every one of those keys is optional: OKF forbids a consumer from rejecting a concept for
+what it left out, so a note with no frontmatter at all is an `Untyped`, `unverified`
+concept and draws like any other.
+
+Reading a concept shows the rest of what it declared, the way the format's own viewer
+does: its `description` and `resource`, who `generated` and `verified` it, the `sources`
+it derives from — a bundle path opens that concept, a URL opens outside — and, read
+backwards off the graph, the concepts that cite it. The frontmatter is read as YAML: block
+and flow mappings and lists, quoted and folded scalars, and a v0.1 `timestamp` still
+stands in for `generated.at`.
 
 Skipped while scanning: `.git`, `.obsidian`, `node_modules`, `.brain-map`,
 `__pycache__`, `.venv`, `venv`, `dist`, `build`, `.next`, `.cache`, and any

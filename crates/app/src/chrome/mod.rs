@@ -63,9 +63,10 @@ impl Hint {
             .show(ctx, |ui| {
                 ui.label(
                     RichText::new(
-                        "drag or hjkl to pan · scroll to zoom · click a node to read it · \
-                     / searches, n/N walk the matches · space e hides the explorer · \
-                     R replays · F fullscreen · Esc releases",
+                        "hjkl walks the tree, l or Enter reads a note, g/G its ends · \
+                     drag or the arrows pan, scroll zooms · / searches, n/N walk the \
+                     matches · space e hides the explorer · R replays · F fullscreen · \
+                     Esc releases",
                     )
                     .size(10.5)
                     .color(color(theme.muted)),

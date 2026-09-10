@@ -21,10 +21,11 @@ mod tree;
 
 use brain_map_model::Source;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Open the window on a vault, or on the picker when there is none yet. The error is a
 /// string so that nothing of egui reaches the scanner side.
-pub fn run(source: Box<dyn Source>, vault: Option<PathBuf>) -> Result<(), String> {
+pub fn run(source: Arc<dyn Source>, vault: Option<PathBuf>) -> Result<(), String> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("brain-map")

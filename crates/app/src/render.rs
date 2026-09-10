@@ -61,7 +61,7 @@ impl Frame<'_> {
     fn at(&self, x: f64, y: f64) -> Pos2 {
         let view = &self.sim.view;
         let centre = (
-            self.rect.left() as f64 + (self.sim.viewport.w + self.sim.viewport.panel) / 2.0,
+            self.rect.left() as f64 + self.sim.viewport.w / 2.0,
             self.rect.top() as f64 + self.sim.viewport.h / 2.0,
         );
         Pos2::new(
