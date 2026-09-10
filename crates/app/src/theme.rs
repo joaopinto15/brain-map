@@ -36,7 +36,7 @@ pub struct Theme {
     pub label: &'static str,
     /// Themes without a palette keep the colours the vault itself decided.
     pub palette: Option<&'static [&'static str]>,
-    pub router: Option<&'static str>,
+    pub structure: Option<&'static str>,
 }
 
 pub const THEMES: &[Theme] = &[
@@ -62,7 +62,7 @@ pub const THEMES: &[Theme] = &[
         link_dim: "rgba(90,110,140,.05)",
         label: "rgba(229,231,235,.85)",
         palette: None,
-        router: None,
+        structure: None,
     },
     Theme {
         key: "onedark",
@@ -89,7 +89,34 @@ pub const THEMES: &[Theme] = &[
             "#61afef", "#e5c07b", "#c678dd", "#98c379", "#e06c75", "#56b6c2", "#d19a66", "#be5046",
             "#7f848e", "#abb2bf", "#528bff", "#c8ae9d",
         ]),
-        router: Some("#98c379"),
+        structure: Some("#98c379"),
+    },
+    Theme {
+        key: "gruvbox",
+        name: "Gruvbox",
+        bg: "#282828",
+        panel: "rgba(40,40,40,.9)",
+        border: "#504945",
+        text: "#ebdbb2",
+        muted: "#928374",
+        accent: "#b8bb26",
+        input_bg: "#1d2021",
+        input_border: "#504945",
+        btn_bg: "#3c3836",
+        btn_hover: "#504945",
+        heading: "#fbf1c7",
+        strong: "#fabd2f",
+        code: "#fb4934",
+        canvas_bg: "#282828",
+        link: "rgba(146,131,116,.4)",
+        link_lit: "rgba(131,165,152,.75)",
+        link_dim: "rgba(146,131,116,.08)",
+        label: "rgba(235,219,178,.9)",
+        palette: Some(&[
+            "#83a598", "#fabd2f", "#d3869b", "#b8bb26", "#fb4934", "#8ec07c", "#fe8019", "#d65d0e",
+            "#a89984", "#ebdbb2", "#458588", "#bdae93",
+        ]),
+        structure: Some("#b8bb26"),
     },
 ];
 
@@ -168,13 +195,13 @@ impl Theme {
                 .map_or_else(|| self.muted.to_string(), |g| g.color.clone());
         };
         match key {
-            "router" => return self.router.unwrap_or(self.accent).to_string(),
+            "__structure" => return self.structure.unwrap_or(self.accent).to_string(),
             "external" => return self.muted.to_string(),
             _ => {}
         }
         let at = groups
             .iter()
-            .filter(|g| g.key != "router" && g.key != "external")
+            .filter(|g| g.key != "__structure" && g.key != "external")
             .position(|g| g.key == key)
             .unwrap_or(0);
         palette[at % palette.len()].to_string()
@@ -229,7 +256,7 @@ mod tests {
     use super::*;
 
     fn groups() -> Vec<Group> {
-        ["router", "ideas", "daily", "external"]
+        ["__structure", "ideas", "daily", "external"]
             .iter()
             .map(|key| Group {
                 key: (*key).to_string(),
@@ -297,7 +324,7 @@ mod tests {
     fn a_palette_repaints_the_groups_but_spares_the_structure() {
         let onedark = &THEMES[by_key("onedark").expect("onedark")];
         let groups = groups();
-        assert_eq!(onedark.group_color(&groups, "router"), "#98c379");
+        assert_eq!(onedark.group_color(&groups, "__structure"), "#98c379");
         assert_eq!(onedark.group_color(&groups, "external"), onedark.muted);
         assert_eq!(
             onedark.group_color(&groups, "ideas"),
