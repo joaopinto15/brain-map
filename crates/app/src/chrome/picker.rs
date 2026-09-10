@@ -20,10 +20,9 @@ const EXAMPLES: [(&str, &str); 3] = [
 
 #[derive(Default)]
 pub struct Picker {
-    /// What is being typed — a location to open, or a word to search for — and what went
-    /// wrong with the last one. Both belong to the picker and to nothing else.
+    /// What is being typed — a location to open, or a word to search for. It belongs to
+    /// the picker and to nothing else; what went wrong belongs to whoever tried to open it.
     typed: String,
-    error: String,
     /// The configured drives, asked for once: running rclone every frame would be silly.
     drives: Option<Vec<String>>,
     /// Set when something else filled the field, so the caret goes back to it.
@@ -149,31 +148,20 @@ impl Picker {
                     }
                 }
 
-                if !self.error.is_empty() {
+                if session.opening() {
                     ui.add_space(10.0);
-                    ui.label(RichText::new(&self.error).color(color(theme.code)));
+                    ui.label(RichText::new("opening…").color(color(theme.muted)));
+                } else if !session.open_error().is_empty() {
+                    ui.add_space(10.0);
+                    ui.label(RichText::new(session.open_error()).color(color(theme.code)));
                 }
             });
 
         if browse {
-            self.error.clear();
-            match session.choose_folder() {
-                Ok(Some(chosen)) => {
-                    self.typed = chosen.clone();
-                    open = Some(chosen);
-                }
-                Ok(None) => self.error = "no folder chosen".into(),
-                Err(said) => self.error = said,
-            }
+            session.browse_vault();
         }
         if let Some(typed) = open.filter(|t| !t.trim().is_empty()) {
-            match session.open_vault(ctx, &typed) {
-                Ok(()) => {
-                    self.error.clear();
-                    self.typed.clear();
-                }
-                Err(said) => self.error = said,
-            }
+            session.open_vault(&typed);
         }
     }
 }

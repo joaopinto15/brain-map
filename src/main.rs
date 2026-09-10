@@ -76,7 +76,7 @@ fn main() {
         Some(dir) => println!("brain-map: opening {}", dir.display()),
         None => println!("brain-map: pick a vault in the window"),
     }
-    if let Err(why) = brain_map_app::run(Box::new(Disk), vault) {
+    if let Err(why) = brain_map_app::run(std::sync::Arc::new(Disk), vault) {
         eprintln!("brain-map: {why}");
         std::process::exit(1);
     }

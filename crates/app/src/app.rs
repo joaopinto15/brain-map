@@ -12,6 +12,8 @@ use crate::state::{Engine, Ui};
 use brain_map_model::{Graph, Source};
 use eframe::egui::{self, Context};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// How often the vault is asked whether it has changed.
@@ -25,7 +27,7 @@ pub struct App {
 impl App {
     pub fn new(
         cc: &eframe::CreationContext<'_>,
-        source: Box<dyn Source>,
+        source: Arc<dyn Source>,
         vault: Option<PathBuf>,
     ) -> App {
         App {
@@ -48,8 +50,13 @@ pub struct Session {
     pub engine: Engine,
     /// The emoji pictures, loaded once out of the desktop's font.
     pub icons: Icons,
-    source: Box<dyn Source>,
+    source: Arc<dyn Source>,
     vault: Option<PathBuf>,
+    /// A vault being opened on a worker thread, and what went wrong with the last one.
+    /// The dialog and the clone take as long as they take, and a frame that waits on one
+    /// is a window the compositor calls not responding.
+    job: Option<Receiver<Result<PathBuf, String>>>,
+    error: String,
     /// The open note, parsed the once when the reader moves rather than every frame.
     note: Option<(usize, Vec<Block>)>,
     /// The vault named on the command line, waiting for the first frame: egui has no
@@ -65,7 +72,7 @@ pub struct Session {
 impl Session {
     fn new(
         cc: &eframe::CreationContext<'_>,
-        source: Box<dyn Source>,
+        source: Arc<dyn Source>,
         vault: Option<PathBuf>,
     ) -> Session {
         let ui = Ui::new(vault.is_some());
@@ -81,6 +88,8 @@ impl Session {
             pending: vault,
             mark: None,
             polled: Instant::now(),
+            job: None,
+            error: String::new(),
         }
     }
 
@@ -93,6 +102,7 @@ impl Session {
         let screen = ctx.screen_rect();
         self.engine
             .resize(screen.width() as f64, screen.height() as f64);
+        self.finish_open(ctx);
         if let Some(vault) = self.pending.take() {
             self.load(ctx, vault, true);
         }
@@ -131,20 +141,67 @@ impl Session {
         }
     }
 
-    /// A path someone typed or picked. The error is theirs to show.
-    pub fn open_vault(&mut self, ctx: &Context, typed: &str) -> Result<(), String> {
-        let dir = self.source.open_vault(typed)?;
-        // Remembered before the load, so the Ui the load builds reads the fresh list.
-        self.engine
-            .ui_mut()
-            .remember_vault(&dir.display().to_string());
-        self.load(ctx, dir, true);
-        self.engine.ui_mut().close_picker();
-        Ok(())
+    /// A path someone typed or picked, opened off the frame thread.
+    pub fn open_vault(&mut self, typed: &str) {
+        let typed = typed.to_string();
+        self.spawn(move |source| source.open_vault(&typed));
     }
 
-    pub fn choose_folder(&self) -> Result<Option<String>, String> {
-        self.source.choose_folder()
+    /// The desktop's folder dialog, and the vault it names. One job, because the dialog
+    /// stays open for as long as someone is browsing in it.
+    pub fn browse_vault(&mut self) {
+        self.spawn(|source| {
+            let chosen = source
+                .choose_folder()?
+                .ok_or_else(|| "no folder chosen".to_string())?;
+            source.open_vault(&chosen)
+        });
+    }
+
+    /// True while a vault is being opened, so the picker says so and asks for no second one.
+    pub fn opening(&self) -> bool {
+        self.job.is_some()
+    }
+
+    /// Why the last open did not happen, for whoever asked for it to show.
+    pub fn open_error(&self) -> &str {
+        &self.error
+    }
+
+    fn spawn(
+        &mut self,
+        work: impl FnOnce(&dyn Source) -> Result<PathBuf, String> + Send + 'static,
+    ) {
+        if self.job.is_some() {
+            return;
+        }
+        self.error.clear();
+        let source = Arc::clone(&self.source);
+        let (tx, rx) = mpsc::channel();
+        self.job = Some(rx);
+        std::thread::spawn(move || tx.send(work(source.as_ref())));
+    }
+
+    /// The worker's answer, taken on the frame that finds it. The window repaints every
+    /// frame anyway, so there is nothing to wake.
+    fn finish_open(&mut self, ctx: &Context) {
+        let Some(job) = &self.job else {
+            return;
+        };
+        match job.try_recv() {
+            Err(TryRecvError::Empty) => return,
+            Ok(Ok(dir)) => {
+                // Remembered before the load, so the Ui the load builds reads the fresh list.
+                self.engine
+                    .ui_mut()
+                    .remember_vault(&dir.display().to_string());
+                self.load(ctx, dir, true);
+                self.engine.ui_mut().close_picker();
+            }
+            Ok(Err(said)) => self.error = said,
+            Err(TryRecvError::Disconnected) => self.error = "the vault could not be opened".into(),
+        }
+        self.job = None;
     }
 
     pub fn drives(&self) -> Vec<String> {
