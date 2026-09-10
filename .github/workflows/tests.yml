@@ -1,0 +1,24 @@
+# The whole workspace, on every pull request. Built on Arch for the same reason the
+# release is: the window's libraries are the ones the package will install.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install the toolchain
+        run: >
+          pacman -Syu --noconfirm git rust pkgconf
+          libglvnd libxkbcommon wayland libx11 libxcursor libxrandr libxi noto-fonts-emoji
+
+      - uses: actions/checkout@v4
+
+      # The scanner, and the half of the window that never opens one.
+      - run: cargo test --workspace --locked
+      - run: cargo fmt --all --check
