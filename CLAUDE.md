@@ -29,6 +29,13 @@ to find a driver and mesa no longer ships one, so `flake.nix` builds one; NixOS'
 Flakes only see git-tracked files: `git add` a new file before building, or the build
 fails on it.
 
+## Branches
+
+`main` takes no direct pushes. Every change is a branch and a pull request, and the
+branch says what kind of change it is: `feature/`, `bugfix/` or `hotfix/`, then lower
+case words joined by hyphens. `.github/workflows/branch-name.yml` fails a pull request
+whose branch is named anything else.
+
 ## Shape
 
 Three crates, and one seam between them.
