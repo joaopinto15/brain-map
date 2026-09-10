@@ -59,16 +59,26 @@ page lists what rclone is configured with, and running a program is the scanner'
   the two can never disagree about what is part of the vault.
 - **`node.rs`** owns `NodeId` and what a note path means. The `__vault__` / `__dir__`
   prefixes are built in `NodeId::node_id` and nowhere else.
-- **`layout.rs`** owns everything that differs between a generic folder vault and an AIOS
-  vault: groups, node assignment, the structural tree, and `keeps_isolates`. Two adapters,
-  `Layout::generic` and `Layout::aios`. A new rule that only applies to one of them belongs
-  in its constructor, not in an `if` further down the pipeline. A note's group is where it
-  lives — its top-level folder, or its AIOS role — and nothing else: frontmatter `type` is
-  read past, because what a note is about is its tags, which cut across folders and filter
-  on their own axis. `bucket` is that decision, and it takes only the path.
-
+- **`yaml.rs`** is the frontmatter as a value tree: the subset of YAML the sample bundles
+  are written in — block and flow mappings and lists, quoted and folded scalars, comments.
+  Every value is a string, so a timestamp stays the text the author wrote. No anchors,
+  block scalars or tags: none of the samples use them, and a YAML crate is a dependency
+  the scanner does not take. `vault.rs` only finds the `---` block; this reads it.
+- **`okf.rs`** is the Open Knowledge Format, decided: `Front` is every key the graph reads,
+  typed, and the one place a key name is spelled — `type`, `title`, `description`,
+  `resource`, `tags`, `icon`, `status`, `stale_after`, `generated`, `verified`, `sources`,
+  and the v0.1 `timestamp` fallback. The rules live beside it: which trust tier `verified`
+  earns, whether `stale_after` has passed, which filenames are reserved. Every rule is a
+  pure function over what a note said, so the spec's sections are checkable one test at a
+  time.
+- **`layout.rs`** owns groups, node assignment and the structural tree. A concept's group
+  is the `type` it declares and nothing else: not its folder, not a keyword, not a guess.
+  Folders are structure — a bundle organizes its concepts into directories however it
+  likes, so one holds several types and a type spreads over several folders — and the tree
+  is drawn but never grouped on. There is one layout, because there is one format.
 - **`links.rs`** reads connections out of note text only. It never sees the layout.
-- **`graph.rs`** merges, prunes, orders, indexes, and hands over a `Graph`.
+- **`graph.rs`** merges, orders, indexes, and hands over a `Graph`. It is where the clock
+  is read, once, so every concept's staleness is judged against the same instant.
 
 ### The window
 
@@ -112,7 +122,23 @@ search text, the picker owns the path being typed.
   than nothing: it made `machine-learning` a slot machine and `Service` a service dog. If
   an icon is missing, the fix is a line in the note, not a rule in the code.
 - A tag has no icon. An icon belongs to a note, and a tag belongs to many, so the legend
-  lists tags as words.
+  lists tags as words. A type and a signal are words for the same reason.
+- **A concept is taken as it is found.** OKF §11 forbids a consumer from rejecting one for
+  a missing field, an unknown `type`, an unrecognized key or a broken link, and nothing
+  here does: a note with no frontmatter at all is an `Untyped`, `unverified` concept and
+  draws like any other. That is also why there is no bundle detection and no OKF mode —
+  every vault is read this way, and a vault that declares nothing simply has one type.
+- Trust is derived, never stored: `okf::trust` reads the `verified` actors and returns a
+  tier, and the graph carries the tier. The `human:` prefix (§7) is the whole of that rule.
+- The reader shows what the concept declared and nothing it did not: the description, the
+  `resource` as a link, who generated and verified it, the `sources` it derives from, and
+  the concepts that cite it — the last read backwards off the graph's own edges, in
+  `Engine::cited_by`. A source that names a note in this vault opens it; a URL opens
+  outside; a scope descriptor (§5.1) is words. `Node::concept` is the seam that carries
+  all of it, and the simulation never copies it.
+- The legend's three axes are one mechanism: `Filter::Group`, `Filter::Signal` and
+  `Filter::Tag` differ only in what `filter::matches` compares, and all three produce the
+  same lit set. A fourth axis is a variant and an arm, not a second way to dim.
 - A name too long for the explorer ends in an ellipsis, and the whole of it is the
   tooltip. A file row is `Button::selectable(..).truncate()`, which is egui's own; a
   folder row cannot be, because `CollapsingHeader` lays its title out with
@@ -158,12 +184,14 @@ search text, the picker owns the path being typed.
   Loading against a viewport that is still zero clamps the explorer to its minimum and it
   never grows back.
 - The graph is painted on egui's background layer across the whole window, and the panels
-  are drawn over it. That is why `Sim::viewport` still carries `panel`: the window is the
-  full screen and the explorer covers its left edge, which is what shifts the centre the
-  camera aims at.
+  are drawn over it. The camera centres on the whole window and knows nothing about the
+  explorer, which floats over the graph's left edge rather than pushing it aside — so
+  opening the tree never moves the graph.
 - The explorer's width lives in one place, `Ui::panel_w`, and `Engine::set_panel` is the
   only writer. The grip and the settings slider both go through it; nothing reads a
-  literal.
+  literal. It is a layout width only — the simulation never hears about it. It outlives the
+  run in the settings file as `panel`, written by `Engine::remember_panel` when the grip is
+  let go rather than while it moves, since a drag changes the width every frame.
 - The picker is the start page, so it is the only thing on screen until a vault is open:
   `Chrome::show` draws the bar, the hint, the explorer and the legend only once
   `graph().vault` is set, since an empty count and a legend with no rows say nothing. One
@@ -209,8 +237,11 @@ search text, the picker owns the path being typed.
   ends: no label overlap, folders visibly further apart than their own notes, and most
   names still drawn at the settled zoom. The simulation's RNG is seeded, so a layout is
   reproducible and those numbers are the same every run.
-- Settings outlive a run in one `key=value` file under the desktop's config directory. A
-  key may repeat, which is the whole of the recent-vaults list — no format and no parser.
+- Settings outlive a run in one `key=value` file under the desktop's config directory,
+  `~/.config/brain-map/settings`. A key may repeat, which is the whole of the recent-vaults
+  list — no format and no parser. Every setting the dialog has is a key in it — `theme`,
+  `growth`, `panel`, `explorer`, `recent` — so a setting added to the dialog is a key added
+  to `settings.rs` and read in `Ui::new`.
 - `open_in_editor` wraps `$EDITOR` in a terminal emulator (table `TERMINALS`, `$TERMINAL`
   first) and detaches it with `setsid`, so a terminal editor never lands in the terminal
   running brain-map. `$VISUAL` skips the wrapper. The argv is built by `editor_command`,

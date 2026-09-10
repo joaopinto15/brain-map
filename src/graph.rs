@@ -4,9 +4,10 @@
 use crate::layout::{Group, Layout};
 use crate::links::Links;
 use crate::node::NodeId;
+use crate::okf;
 use crate::vault::Vault;
 use brain_map_model::Graph;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 
 pub struct Node {
@@ -16,11 +17,12 @@ pub struct Node {
     pub tags: Vec<String>,
     /// What the note's `icon:` said. A folder or the vault has no note, so it has none.
     pub icon: String,
+    pub signals: Vec<String>,
+    pub concept: brain_map_model::Concept,
 }
 
 pub struct Scan {
     pub vault_path: String,
-    pub mode: &'static str,
     pub groups: Vec<Group>,
     pub nodes: Vec<Node>,
     pub links: Vec<(usize, usize)>,
@@ -54,11 +56,6 @@ impl Scan {
         let mut edges: Vec<(NodeId, NodeId)> = layout.tree.clone();
         edges.extend(links.edges.iter().cloned());
 
-        if !layout.keeps_isolates {
-            let linked: HashSet<&NodeId> = edges.iter().flat_map(|(a, b)| [a, b]).collect();
-            ids.retain(|id| linked.contains(id));
-        }
-
         ids.sort_by_cached_key(|id| (layout.rank(layout.group_key(id)), id.sort_key()));
         let index: HashMap<&NodeId, usize> =
             ids.iter().enumerate().map(|(i, id)| (id, i)).collect();
@@ -70,9 +67,9 @@ impl Scan {
         links.sort_unstable();
         links.dedup();
 
+        let now = okf::now();
         Scan {
             vault_path: vault.root.display().to_string(),
-            mode: layout.mode,
             nodes: ids
                 .iter()
                 .map(|id| {
@@ -83,11 +80,15 @@ impl Scan {
                     };
                     Node {
                         label: note
-                            .and_then(|n| n.title.clone())
+                            .and_then(|n| n.front.title.clone())
                             .unwrap_or_else(|| id.label(&vault.name)),
                         group: layout.group_key(id).to_string(),
-                        tags: note.map(|n| n.tags.clone()).unwrap_or_default(),
-                        icon: note.and_then(|n| n.icon.clone()).unwrap_or_default(),
+                        tags: note.map(|n| n.front.tags.clone()).unwrap_or_default(),
+                        icon: note.and_then(|n| n.front.icon.clone()).unwrap_or_default(),
+                        signals: note
+                            .map(|n| okf::signals(&n.front, now))
+                            .unwrap_or_default(),
+                        concept: note.map(|n| n.front.about.clone()).unwrap_or_default(),
                         id: id.clone(),
                     }
                 })
@@ -112,6 +113,8 @@ impl Scan {
                     group: n.group.clone(),
                     tags: n.tags.clone(),
                     icon: n.icon.clone(),
+                    signals: n.signals.clone(),
+                    concept: n.concept.clone(),
                 })
                 .collect(),
             links: self
@@ -137,45 +140,30 @@ mod tests {
     }
 
     #[test]
-    fn folders_lead_their_notes_and_the_vault_leads_everything() {
-        let vault = fixture(
-            false,
-            &[("loose.md", ""), ("ideas/a.md", ""), ("ideas/b.md", "")],
-        );
+    fn the_structure_leads_and_the_concepts_follow_it() {
+        let vault = fixture(&[("loose.md", ""), ("ideas/a.md", ""), ("ideas/b.md", "")]);
         assert_eq!(
             ids(&scan_of(&vault)),
             [
                 "__vault__",
-                "loose.md",
                 "__dir__ideas",
+                "loose.md",
                 "ideas/a.md",
                 "ideas/b.md"
-            ]
-        );
-    }
-
-    #[test]
-    fn aios_drops_notes_nothing_links_to() {
-        let vault = fixture(
-            true,
-            &[
-                ("CLAUDE.md", "[[gh]]"),
-                ("wiki/tools/gh.md", ""),
-                ("wiki/orphan.md", ""),
             ],
+            "the tree grows first, then the concepts type by type"
         );
-        assert_eq!(ids(&scan_of(&vault)), ["CLAUDE.md", "wiki/tools/gh.md"]);
     }
 
     #[test]
-    fn a_generic_vault_keeps_isolates_because_the_tree_holds_them() {
-        let vault = fixture(false, &[("orphan.md", "")]);
+    fn a_bundle_keeps_isolates_because_the_tree_holds_them() {
+        let vault = fixture(&[("orphan.md", "")]);
         assert_eq!(ids(&scan_of(&vault)), ["__vault__", "orphan.md"]);
     }
 
     #[test]
     fn link_indices_point_at_the_sorted_nodes() {
-        let vault = fixture(false, &[("a.md", "[[b]]"), ("b.md", "")]);
+        let vault = fixture(&[("a.md", "[[b]]"), ("b.md", "")]);
         let graph = scan_of(&vault);
         let ids = ids(&graph);
         let named: Vec<(&str, &str)> = graph
@@ -221,21 +209,18 @@ mod tests {
             .expect("external node");
         assert_eq!(external.id.node_id(), "node_modules/pkg/README.md");
         assert_eq!(external.label, "pkg", "a README is labelled by its folder");
-        assert_eq!(graph.mode, "generic folder grouping");
     }
 
     #[test]
-    fn frontmatter_titles_and_tags_reach_the_graph() {
-        let vault = fixture(
-            false,
-            &[
-                (
-                    "m/rev.md",
-                    "---\ntitle: Weekly revenue\ntags: [sales, finance]\n---\n",
-                ),
-                ("m/plain.md", ""),
-            ],
-        );
+    fn frontmatter_titles_tags_and_signals_reach_the_graph() {
+        let vault = fixture(&[
+            (
+                "m/rev.md",
+                "---\ntype: Metric\ntitle: Weekly revenue\ntags: [sales, finance]\n\
+                 verified: { by: human:jp, at: 2026-06-25T09:00:00Z }\nstale_after: 2020-01-01T00:00:00Z\n---\n",
+            ),
+            ("m/plain.md", ""),
+        ]);
         let graph = scan_of(&vault).into_graph();
         let on = |id: &str| {
             graph
@@ -247,27 +232,35 @@ mod tests {
         let titled = on("m/rev.md");
         assert_eq!(
             (titled.label.as_str(), titled.group.as_str()),
-            ("Weekly revenue", "m")
+            ("Weekly revenue", "Metric"),
+            "a concept is named by its title and grouped by its type"
         );
         assert_eq!(titled.tags, ["sales", "finance"]);
+        assert_eq!(titled.signals, ["human-reviewed", "stale"]);
         assert!(
             on("m/plain.md").tags.is_empty(),
             "an untagged note carries no tags"
+        );
+        assert_eq!(
+            on("m/plain.md").signals,
+            ["unverified"],
+            "and one that declared no trust is unverified, not signal-less"
+        );
+        assert!(
+            on("__dir__m").signals.is_empty(),
+            "a folder declares nothing, so it carries nothing"
         );
     }
 
     #[test]
     fn a_note_carries_the_icon_it_declares_and_no_other() {
-        let vault = fixture(
-            false,
-            &[
-                (
-                    "ideas/drawn.md",
-                    "---\nicon: \u{1f427}\ntags: [linux]\n---\n",
-                ),
-                ("ideas/quiet.md", "---\ntags: [linux]\n---\n"),
-            ],
-        );
+        let vault = fixture(&[
+            (
+                "ideas/drawn.md",
+                "---\nicon: \u{1f427}\ntags: [linux]\n---\n",
+            ),
+            ("ideas/quiet.md", "---\ntags: [linux]\n---\n"),
+        ]);
         let graph = scan_of(&vault).into_graph();
         let on = |id: &str| {
             graph
@@ -291,11 +284,11 @@ mod tests {
 
     #[test]
     fn the_graph_carries_every_group_node_and_link() {
-        let vault = fixture(false, &[("a.md", "[[b]]"), ("b.md", "")]);
+        let vault = fixture(&[("a.md", "[[b]]"), ("b.md", "")]);
         let graph = scan_of(&vault).into_graph();
         assert_eq!(graph.nodes[0].id, "__vault__");
         assert_eq!(graph.nodes[0].label, "MyVault");
-        assert!(graph.group("root").is_some());
+        assert!(graph.group("Untyped").is_some());
         assert!(!graph.links.is_empty());
     }
 }

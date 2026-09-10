@@ -6,7 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
-/// A colour group: one top-level folder, or one AIOS role.
+/// A colour group: one OKF concept type, plus the structural tree and the external
+/// files that are not concepts at all.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Group {
     pub key: String,
@@ -33,6 +34,42 @@ pub struct Node {
     /// What the note's `icon:` said, or empty. Nothing derives this: an icon is written
     /// in the note or the node draws as a plain disc.
     pub icon: String,
+    /// The OKF trust and lifecycle signals the concept declared: its trust tier, a status
+    /// that is not the default, and `stale` once it is. Derived in the scanner, where the
+    /// clock and the frontmatter both are, so the window only ever reads them.
+    pub signals: Vec<String>,
+    /// The rest of what the concept said about itself, for the reader to show.
+    pub concept: Concept,
+}
+
+/// What a concept's frontmatter says about itself beyond its type, tags and icon
+/// (OKF §4.1, §5): the prose, the asset it describes, who wrote and confirmed it, and
+/// what it derives from. Every field is optional in the format and empty here when absent.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Concept {
+    pub description: String,
+    /// The canonical URI of the asset the concept describes, or empty for an idea.
+    pub resource: String,
+    pub generated: Option<Actor>,
+    pub verified: Vec<Actor>,
+    pub sources: Vec<Provenance>,
+}
+
+/// Who did something and when, in OKF's actor convention (§7): `human:<id>`,
+/// `process:<id>` or `<producer>/<version>`, and an ISO 8601 instant, both as written.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Actor {
+    pub by: String,
+    pub at: String,
+}
+
+/// One `sources` entry (§5.1): a material the concept derives from, named by a URL, a
+/// bundle path, or a scope descriptor a consumer cannot follow.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Provenance {
+    pub id: String,
+    pub title: String,
+    pub resource: String,
 }
 
 /// An edge, by node index.
@@ -72,7 +109,7 @@ pub fn is_structural(id: &str) -> bool {
 /// the scanner answers, and neither side can see the other's insides. Everything that
 /// touches the disk or the desktop is on this side of the line, which is why the drives
 /// joined it rather than the picker learning to run a program.
-pub trait Source {
+pub trait Source: Send + Sync {
     /// The whole vault, rescanned. `/graph.json` was this.
     fn scan(&self, vault: &Path) -> Graph;
     /// One number over every note's path, length and mtime. It moving means reload.
