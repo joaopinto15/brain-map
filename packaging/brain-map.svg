@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>brain-map</title>
+  <!-- The window's own picture: a lit node, its neighbours, and the links between them.
+       The colours are the One Dark palette the themes table opens with. -->
+  <rect width="128" height="128" rx="24" fill="#282c34"/>
+  <g stroke="#5c6370" stroke-width="2.5" stroke-linecap="round" opacity="0.75">
+    <path d="M64 62 L36 34"/>
+    <path d="M64 62 L98 42"/>
+    <path d="M64 62 L34 92"/>
+    <path d="M64 62 L92 96"/>
+    <path d="M36 34 L98 42"/>
+    <path d="M34 92 L92 96"/>
+  </g>
+  <g>
+    <circle cx="64" cy="62" r="15" fill="#98c379"/>
+    <circle cx="36" cy="34" r="9" fill="#61afef"/>
+    <circle cx="98" cy="42" r="8" fill="#e5c07b"/>
+    <circle cx="34" cy="92" r="8" fill="#c678dd"/>
+    <circle cx="92" cy="96" r="10" fill="#e06c75"/>
+  </g>
+</svg>

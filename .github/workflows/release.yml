@@ -37,6 +37,7 @@ jobs:
           v=${GITHUB_REF_NAME#v}
           install -Dm755 target/release/brain-map dist/brain-map
           install -Dm644 README.md LICENSE -t dist/
+          install -Dm644 packaging/brain-map.desktop packaging/brain-map.svg -t dist/
           tar -C dist -czf "brain-map-$v-x86_64.tar.gz" .
           sha256sum "brain-map-$v-x86_64.tar.gz" | tee sha256sums.txt
 
