@@ -8,6 +8,11 @@ use crate::app::Session;
 use crate::keys::{binding, key_name, Action};
 use eframe::egui::{self, Context, Id, Key};
 
+/// How far `j` moves the reader, and how far `g` and `G` throw it. A scroll area clamps
+/// what it is given, so the whole note is one keystroke either way.
+const LINE: f32 = 28.0;
+const PAGE: f32 = 1.0e6;
+
 #[derive(Default)]
 pub struct Keymap {
     /// Space, waiting for the key it leads.
@@ -76,6 +81,36 @@ impl Keymap {
             Action::NextMatch => engine.step(1),
             Action::PrevMatch => engine.step(-1),
             Action::Pan(dx, dy) => engine.pan_step(dx, dy),
+            // The panel shows one of two things, so the same key moves whichever it is:
+            // the note when one is open, the tree when none is.
+            Action::Down => match engine.ui().reading().is_some() {
+                true => engine.ui_mut().scroll_by(-LINE),
+                false => engine.move_cursor(1),
+            },
+            Action::Up => match engine.ui().reading().is_some() {
+                true => engine.ui_mut().scroll_by(LINE),
+                false => engine.move_cursor(-1),
+            },
+            Action::Out => match engine.ui().reading().is_some() {
+                // Out of the note is back to the tree it was chosen from.
+                true => engine.close_note(),
+                false => engine.cursor_out(),
+            },
+            // The tree is not on screen while a note is: reading it again is a key away,
+            // and Esc or `h` is what puts the tree back.
+            Action::Into => {
+                if engine.ui().reading().is_none() {
+                    engine.cursor_into();
+                }
+            }
+            Action::Top => match engine.ui().reading().is_some() {
+                true => engine.ui_mut().scroll_by(PAGE),
+                false => engine.cursor_edge(false),
+            },
+            Action::Bottom => match engine.ui().reading().is_some() {
+                true => engine.ui_mut().scroll_by(-PAGE),
+                false => engine.cursor_edge(true),
+            },
         }
     }
 }

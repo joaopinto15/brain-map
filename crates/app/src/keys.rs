@@ -15,6 +15,16 @@ pub enum Action {
     ToggleFull,
     NextMatch,
     PrevMatch,
+    /// The explorer, walked the way vi walks a list: `j` and `k` move a row, `h` shuts a
+    /// folder or steps out of it, `l` opens one or reads the note, `g` and `G` are the
+    /// ends. With a note open the same keys move the reader, since the note is what the
+    /// panel is showing.
+    Down,
+    Up,
+    Out,
+    Into,
+    Top,
+    Bottom,
     /// A fixed screen distance, so it moves the same amount at any zoom.
     Pan(f64, f64),
 }
@@ -41,10 +51,18 @@ pub fn binding(key: &str, leader: bool, in_field: bool) -> Option<Action> {
         "f" | "F" => Some(Action::ToggleFull),
         "n" => Some(Action::NextMatch),
         "N" => Some(Action::PrevMatch),
-        "h" => Some(Action::Pan(-1.0, 0.0)),
-        "l" => Some(Action::Pan(1.0, 0.0)),
-        "k" => Some(Action::Pan(0.0, -1.0)),
-        "j" => Some(Action::Pan(0.0, 1.0)),
+        "j" => Some(Action::Down),
+        "k" => Some(Action::Up),
+        "h" => Some(Action::Out),
+        "l" | "Enter" => Some(Action::Into),
+        "g" => Some(Action::Top),
+        "G" => Some(Action::Bottom),
+        // The camera keeps the arrows: hjkl belong to the tree now, and a graph still has
+        // to be pannable without a mouse.
+        "Left" => Some(Action::Pan(-1.0, 0.0)),
+        "Right" => Some(Action::Pan(1.0, 0.0)),
+        "Up" => Some(Action::Pan(0.0, -1.0)),
+        "Down" => Some(Action::Pan(0.0, 1.0)),
         _ => None,
     }
 }
@@ -56,6 +74,11 @@ pub fn key_name(key: Key, shift: bool) -> Option<String> {
         Key::Escape => "Escape",
         Key::Space => " ",
         Key::Slash => "/",
+        Key::Enter => "Enter",
+        Key::ArrowLeft => "Left",
+        Key::ArrowRight => "Right",
+        Key::ArrowUp => "Up",
+        Key::ArrowDown => "Down",
         _ => "",
     };
     if !named.is_empty() {
@@ -109,8 +132,27 @@ mod tests {
         assert_eq!(binding("n", false, false), Some(Action::NextMatch));
         assert_eq!(binding("N", false, false), Some(Action::PrevMatch));
         assert_eq!(binding("Escape", false, false), Some(Action::Release));
-        assert_eq!(binding("h", false, false), Some(Action::Pan(-1.0, 0.0)));
-        assert_eq!(binding("j", false, false), Some(Action::Pan(0.0, 1.0)));
+        assert_eq!(binding("Left", false, false), Some(Action::Pan(-1.0, 0.0)));
+        assert_eq!(binding("Down", false, false), Some(Action::Pan(0.0, 1.0)));
+    }
+
+    #[test]
+    fn the_tree_is_walked_the_way_vi_walks_one() {
+        assert_eq!(binding("j", false, false), Some(Action::Down));
+        assert_eq!(binding("k", false, false), Some(Action::Up));
+        assert_eq!(binding("h", false, false), Some(Action::Out));
+        assert_eq!(binding("l", false, false), Some(Action::Into));
+        assert_eq!(binding("Enter", false, false), Some(Action::Into));
+        assert_eq!(binding("g", false, false), Some(Action::Top));
+        assert_eq!(binding("G", false, false), Some(Action::Bottom));
+        // The names have to be the ones a keypress is given, or nothing fires.
+        for key in [Key::Enter, Key::ArrowDown, Key::ArrowUp] {
+            let name = key_name(key, false).expect("a name");
+            assert!(
+                binding(&name, false, false).is_some(),
+                "{name} names nothing"
+            );
+        }
     }
 
     #[test]

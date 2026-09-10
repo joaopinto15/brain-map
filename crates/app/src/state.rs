@@ -15,10 +15,9 @@ use crate::theme::{Theme, THEMES};
 use crate::{links, tree};
 use brain_map_model::{is_structural, Graph};
 use eframe::egui::{Color32, Context, FontId, Painter, Pos2, Rect};
+use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Below this the explorer covers almost everything, so the graph stops making room.
-const NARROW: f64 = 700.0;
 const MIN_PANEL: f64 = 220.0;
 pub const MAX_PANEL: f64 = 900.0;
 /// How far a key moves the camera, in screen pixels, so it is the same at any zoom.
@@ -44,6 +43,13 @@ pub struct Ui {
     settings_open: bool,
     picker_open: bool,
     recent: Vec<String>,
+    /// The explorer, as the keyboard sees it: the folders that are shut, the row the
+    /// cursor is on, and whether it has been moved since the panel last scrolled to it.
+    closed: HashSet<String>,
+    cursor: Option<tree::Key>,
+    chased: bool,
+    /// Lines the reader was asked to scroll, taken by the note panel on the next frame.
+    scroll: f32,
 }
 
 impl Ui {
@@ -55,8 +61,8 @@ impl Ui {
             reading: None,
             full: false,
             theme: settings.theme().unwrap_or(0),
-            panel_w: settings.panel_width(420.0),
-            panel_hidden: false,
+            panel_w: settings.panel(MIN_PANEL),
+            panel_hidden: !settings.explorer(),
             budget: settings.budget(crate::sim::GROWTH_MS),
             settings_open: false,
             // No vault yet: the window opens on the picker instead of an empty graph. A
@@ -64,6 +70,10 @@ impl Ui {
             // that decides, not the count.
             picker_open: !vault_chosen,
             recent: settings.recent(),
+            closed: HashSet::new(),
+            cursor: None,
+            chased: false,
+            scroll: 0.0,
             settings,
         }
     }
@@ -87,6 +97,44 @@ impl Ui {
 
     pub fn reading(&self) -> Option<usize> {
         self.reading
+    }
+
+    /// Whether a folder is open. A folder nobody has shut is open, which is how the tree
+    /// has always drawn itself.
+    pub fn dir_open(&self, path: &str) -> bool {
+        !self.closed.contains(path)
+    }
+
+    pub fn cursor(&self) -> Option<&tree::Key> {
+        self.cursor.as_ref()
+    }
+
+    /// True once, on the frame after a motion: the panel scrolls the cursor into view and
+    /// then leaves the scrollbar alone.
+    pub fn take_chase(&mut self) -> bool {
+        std::mem::take(&mut self.chased)
+    }
+
+    /// What the reader was asked to scroll, in points, taken by the note panel.
+    pub fn take_scroll(&mut self) -> f32 {
+        std::mem::take(&mut self.scroll)
+    }
+
+    /// The reader, scrolled by a key rather than a wheel.
+    pub fn scroll_by(&mut self, points: f32) {
+        self.scroll += points;
+    }
+
+    /// A row the pointer chose. The keyboard and the mouse share one cursor, so `j` after
+    /// a click carries on from what was clicked.
+    pub fn point_at(&mut self, key: tree::Key) {
+        self.cursor = Some(key);
+    }
+
+    pub fn toggle_dir(&mut self, path: &str) {
+        if !self.closed.remove(path) {
+            self.closed.insert(path.to_string());
+        }
     }
 
     pub fn is_full(&self) -> bool {
@@ -174,12 +222,6 @@ impl Ui {
     pub fn remember_vault(&mut self, vault: &str) {
         self.recent = self.settings.remember(vault);
     }
-
-    /// The width is dragged as well as typed, so it is saved when the drag ends rather
-    /// than on every frame of it.
-    pub fn save_panel_width(&mut self) {
-        self.settings.set_panel_width(self.panel_w);
-    }
 }
 
 pub struct Engine {
@@ -188,6 +230,7 @@ pub struct Engine {
     index: links::Index,
     tree: tree::Dir,
     group_counts: Vec<usize>,
+    signal_counts: Vec<(String, usize)>,
     top_tags: Vec<(String, usize)>,
     found: Vec<usize>,
     found_at: usize,
@@ -208,6 +251,7 @@ impl Engine {
             index: links::Index::of(ids.clone()),
             tree: tree::build(&ids),
             group_counts: crate::filter::group_counts(&sim.nodes, &group_keys),
+            signal_counts: crate::filter::signal_counts(&sim.nodes),
             top_tags: crate::filter::top_tags(&sim.nodes, 12),
             sim,
             graph,
@@ -235,8 +279,94 @@ impl Engine {
         &self.tree
     }
 
+    /// The explorer's rows as the keyboard walks them: the tree flattened to what is
+    /// drawn, so the cursor cannot land on a row inside a folder that is shut.
+    pub fn rows(&self) -> Vec<tree::Row> {
+        tree::rows(&self.tree, &|path| !self.ui.dir_open(path))
+    }
+
+    fn cursor_at(&self, rows: &[tree::Row]) -> Option<usize> {
+        let key = self.ui.cursor()?;
+        rows.iter().position(|row| &row.key == key)
+    }
+
+    fn put_cursor(&mut self, key: tree::Key) {
+        self.ui.point_at(key);
+        self.ui.chased = true;
+    }
+
+    /// `j` and `k`. The cursor stops at either end rather than wrapping: a tree is a list
+    /// you are looking down, not a ring.
+    pub fn move_cursor(&mut self, step: isize) {
+        let rows = self.rows();
+        if rows.is_empty() {
+            return;
+        }
+        let at = match self.cursor_at(&rows) {
+            Some(at) => (at as isize + step).clamp(0, rows.len() as isize - 1) as usize,
+            None if step > 0 => 0,
+            None => rows.len() - 1,
+        };
+        self.put_cursor(rows[at].key.clone());
+    }
+
+    /// `g` and `G`.
+    pub fn cursor_edge(&mut self, end: bool) {
+        let rows = self.rows();
+        let Some(row) = (match end {
+            true => rows.last(),
+            false => rows.first(),
+        }) else {
+            return;
+        };
+        let key = row.key.clone();
+        self.put_cursor(key);
+    }
+
+    /// `h`: shut the folder you are on, or step out to the one you are in.
+    pub fn cursor_out(&mut self) {
+        let rows = self.rows();
+        let Some(at) = self.cursor_at(&rows) else {
+            return self.move_cursor(1);
+        };
+        if let Some(path) = rows[at].dir().filter(|path| self.ui.dir_open(path)) {
+            let path = path.to_string();
+            self.ui.toggle_dir(&path);
+            return;
+        }
+        if let Some(parent) = tree::parent(&rows, at) {
+            self.put_cursor(rows[parent].key.clone());
+        }
+    }
+
+    /// `l` and Enter: open the folder, step into the one already open, or read the note.
+    pub fn cursor_into(&mut self) {
+        let rows = self.rows();
+        let Some(at) = self.cursor_at(&rows) else {
+            return self.move_cursor(1);
+        };
+        if let Some(node) = rows[at].file() {
+            self.go_to(node);
+            return;
+        }
+        let Some(path) = rows[at].dir() else { return };
+        if !self.ui.dir_open(path) {
+            let path = path.to_string();
+            self.ui.toggle_dir(&path);
+            return;
+        }
+        // Already open: the next row is what is inside it, if it holds anything.
+        if let Some(row) = rows.get(at + 1).filter(|row| row.depth > rows[at].depth) {
+            self.put_cursor(row.key.clone());
+        }
+    }
+
     pub fn group_counts(&self) -> &[usize] {
         &self.group_counts
+    }
+
+    pub fn signal_counts(&self) -> &[(String, usize)] {
+        &self.signal_counts
     }
 
     pub fn top_tags(&self) -> &[(String, usize)] {
@@ -246,6 +376,26 @@ impl Engine {
     /// One node, as the chrome asks about it: its id, its name and its tags.
     pub fn node(&self, at: usize) -> &crate::sim::Node {
         &self.sim.nodes[at]
+    }
+
+    /// What the concept's frontmatter said about itself, for the reader to show. The
+    /// graph and the simulation index nodes the same way, so it is the same `at`.
+    pub fn concept(&self, at: usize) -> &brain_map_model::Concept {
+        &self.graph.nodes[at].concept
+    }
+
+    /// The notes whose text links to this one — the graph's edges, read backwards.
+    pub fn cited_by(&self, at: usize) -> Vec<usize> {
+        let mut from: Vec<usize> = self
+            .sim
+            .links
+            .iter()
+            .filter(|l| l.target == at && !is_structural(&self.sim.nodes[l.source].id))
+            .map(|l| l.source)
+            .collect();
+        from.sort_unstable();
+        from.dedup();
+        from
     }
 
     pub fn node_id(&self, at: usize) -> &str {
@@ -261,9 +411,8 @@ impl Engine {
         self.graph.nodes.iter().position(|n| n.id == id)
     }
 
-    /// The window's size, and how much of it the explorer covers. Every resize goes
-    /// through the panel width too: a window that shrank may no longer have room for the
-    /// width the person chose.
+    /// The window's size. Every resize goes through the panel width too: a window that
+    /// shrank may no longer have room for the width the person chose.
     pub fn resize(&mut self, w: f64, h: f64) {
         self.sim.viewport.w = w;
         self.sim.viewport.h = h;
@@ -271,21 +420,24 @@ impl Engine {
     }
 
     /// The explorer's width lives in one place, and this is the only writer: the panel is
-    /// laid out against it and the graph centres on what is left of the window.
+    /// laid out against it. The graph does not move for it — it stays centred on the
+    /// window and the explorer floats over its left edge.
     pub fn set_panel(&mut self, px: f64) {
         let room = (self.sim.viewport.w - 200.0).max(MIN_PANEL);
         self.ui.panel_w = px.clamp(MIN_PANEL, room.min(MAX_PANEL));
-        self.sim.viewport.panel = match self.sim.viewport.w < NARROW || self.ui.panel_hidden {
-            true => 0.0,
-            false => self.ui.panel_w,
-        };
     }
 
-    /// Hiding the explorer gives its width back to the graph, so it goes through the same
-    /// writer rather than being a layout trick the simulation would never hear about.
     pub fn hide_panel(&mut self, on: bool) {
         self.ui.panel_hidden = on;
         self.set_panel(self.ui.panel_w);
+        self.remember_panel();
+    }
+
+    /// The explorer as it was left, written to the settings file. A drag moves the width
+    /// every frame, so this is called when it is let go rather than while it moves.
+    pub fn remember_panel(&mut self) {
+        let (width, hidden) = (self.ui.panel_w, self.ui.panel_hidden);
+        self.ui.settings.set_panel(width, hidden);
     }
 
     pub fn frame(&mut self, delta_ms: f64) {
@@ -393,7 +545,7 @@ impl Engine {
         let k = (self.sim.view.k * (notches * ZOOM).exp()).clamp(MIN_ZOOM, MAX_ZOOM);
         let viewport = self.sim.viewport;
         self.sim.view.k = k;
-        self.sim.view.x = wx - (x - (viewport.w + viewport.panel) / 2.0) / k;
+        self.sim.view.x = wx - (x - viewport.w / 2.0) / k;
         self.sim.view.y = wy - (y - viewport.h / 2.0) / k;
     }
 
