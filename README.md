@@ -87,7 +87,8 @@ nix develop . --command cargo run -- ~/notes     # the window, on a vault
 
 Rust the whole way down, three crates, and one trait between the half that reads the disk
 and the half that draws. [How brain-map is put together](docs/architecture.md) has the
-rest, and the words the project uses for things are in [CONTEXT.md](CONTEXT.md).
+rest, [CONTRIBUTING.md](CONTRIBUTING.md) has the branch names, the checks and how a
+release is cut, and the words the project uses for things are in [CONTEXT.md](CONTEXT.md).
 
 ## License
 

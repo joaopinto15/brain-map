@@ -67,18 +67,8 @@ Decisions that would otherwise be surprising are written up in [adr/](adr).
 
 ## Working on it
 
-```sh
-nix develop . --command cargo test --workspace   # every crate
-nix develop . --command cargo run -- ~/notes     # the window, on a vault
-nix build                                        # the release build
-```
-
-Nix manages every package, so `cargo` and `rustc` are not on the system PATH. The window
-opens libraries it never links against, Wayland, libxkbcommon, and GL, which is why
-`cargo run` outside `nix develop` compiles and then fails to start.
-
-Flakes only see files git knows about. Run `git add` on a new file before building, or
-the build fails on it.
+The toolchain, the branch names, the checks and how a release is cut are in
+[CONTRIBUTING.md](../CONTRIBUTING.md).
 
 The diagrams here are `architecture.excalidraw` and `structure.excalidraw`, drawn in
 [Excalidraw](https://excalidraw.com). `overview.excalidraw` and its `overview.svg` export
