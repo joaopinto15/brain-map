@@ -138,7 +138,7 @@ impl SettingsDialog {
         }
         if chosen.width != session.engine.ui().panel_width() {
             session.engine.set_panel(chosen.width);
-            session.engine.ui_mut().save_panel_width();
+            session.engine.remember_panel();
         }
         if chosen.hidden != session.engine.ui().explorer_hidden() {
             session.engine.hide_panel(chosen.hidden);
