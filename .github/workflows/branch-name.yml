@@ -1,0 +1,32 @@
+# Every change reaches main through a pull request, and every branch says what kind of
+# change it is. The name is checked here so a wrong one fails before review, not after.
+name: branch name
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited]
+
+jobs:
+  branch-name:
+    runs-on: ubuntu-latest
+    steps:
+      - name: The branch must be feature/, bugfix/ or hotfix/
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          if echo "$BRANCH" | grep -Eq '^(feature|bugfix|hotfix)/[a-z0-9][a-z0-9._-]*$'; then
+            echo "$BRANCH"
+            exit 0
+          fi
+          echo "branch '$BRANCH' does not say what it is."
+          echo
+          echo "Name it feature/<what-it-adds>, bugfix/<what-it-fixes> or"
+          echo "hotfix/<what-is-on-fire>, in lower case, words joined by hyphens:"
+          echo "  feature/walk-the-tree-with-vim"
+          echo "  bugfix/legend-runs-off-a-short-window"
+          echo
+          echo "Rename it with:"
+          echo "  git branch -m feature/<name>"
+          echo "  git push origin -u feature/<name>"
+          echo "  git push origin --delete $BRANCH"
+          exit 1
