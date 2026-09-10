@@ -260,8 +260,8 @@ fn copy(source: &str, dir: &Path) -> Result<(), String> {
 /// Run one fetch of a remote vault into `dir`. The first has to work — a failure leaves
 /// no half-vault behind — and a later one may fail: the last import is still on the disk
 /// and opening that beats opening nothing, so an offline machine still works.
-// ponytail: this blocks the frame, the way the folder dialog does. Progress means
-// threading `Source`, and an import happens once.
+// ponytail: no progress, only the wait. The window runs this on a worker thread, so a
+// long clone leaves the frame alone; showing how far it got means parsing git's output.
 fn fetch(program: &str, argv: &[&str], dir: &Path) -> Result<(), String> {
     let fresh = !dir.is_dir();
     let done = Command::new(program)
